@@ -961,6 +961,7 @@ bool CVDPAU::ConfigVDPAU(AVCodecContext* avctx, int ref_frames)
 
   m_startupdelay = true;
   vdpauConfigured = true;
+  m_bNormalSpeed = true;
   return true;
 }
 
@@ -972,20 +973,20 @@ bool CVDPAU::ConfigOutputMethod(AVCodecContext *avctx, AVFrame *pFrame)
     return true;
 
   // check if one of the vdpau interlacing methods are chosen
-  bool vdpauDeinterlace = false;
+  m_bVdpauDeinterlacing = false;
   EINTERLACEMETHOD method = g_settings.m_currentVideoSettings.m_InterlaceMethod;
-   if((method == VS_INTERLACEMETHOD_AUTO && pFrame->interlaced_frame)
+  if((method == VS_INTERLACEMETHOD_AUTO && pFrame->interlaced_frame)
      ||  method == VS_INTERLACEMETHOD_VDPAU_BOB
      ||  method == VS_INTERLACEMETHOD_VDPAU_TEMPORAL
      ||  method == VS_INTERLACEMETHOD_VDPAU_TEMPORAL_HALF
      ||  method == VS_INTERLACEMETHOD_VDPAU_TEMPORAL_SPATIAL
      ||  method == VS_INTERLACEMETHOD_VDPAU_TEMPORAL_SPATIAL_HALF
-     ||  method == VS_INTERLACEMETHOD_VDPAU_INVERSE_TELECINE )
-   {
-     vdpauDeinterlace = true;
-   }
+     ||  method == VS_INTERLACEMETHOD_VDPAU_INVERSE_TELECINE)
+  {
+    m_bVdpauDeinterlacing = true;
+  }
 
-  if (!vdpauDeinterlace && hasVdpauGlInterop)
+  if (!m_bVdpauDeinterlacing && method != VS_INTERLACEMETHOD_VDPAU_NONE && hasVdpauGlInterop)
   {
     if (m_vdpauOutputMethod == OUTPUT_GL_INTEROP_YUV)
       return true;
@@ -1482,10 +1483,8 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame)
     }
     dropcount++;
 
-    // different commit
     // dropping should occur at the end of the queue, not in the middle
     // need to prevent ffmpeg from dropping frames
-#define VC_DROPPED 0
     CSingleLock lock(m_mixerSec);
     if (m_mixerMessages.size() < 3)
       return VC_BUFFER | VC_DROPPED;
@@ -1575,7 +1574,11 @@ bool CVDPAU::GetPicture(AVCodecContext* avctx, AVFrame* frame, DVDVideoPicture* 
   *picture = m_presentPicture->DVDPic;
 
   if (m_presentPicture->render)
+  {
     picture->format = DVDVideoPicture::FMT_VDPAU_420;
+    if (!m_bNormalSpeed)
+      picture->iFlags &= DVP_FLAG_DROPPED;
+  }
   else
   {
     picture->format = DVDVideoPicture::FMT_VDPAU;
@@ -1633,11 +1636,21 @@ void CVDPAU::NormalSpeed(bool normal)
   if (normal)
   {
     SetDeinterlacing();
+    m_bNormalSpeed = true;
   }
   else
   {
     SetDeinterlacingOff();
+    m_bNormalSpeed = false;
   }
+}
+
+bool CVDPAU::AllowDecoderDrop()
+{
+  if (m_bVdpauDeinterlacing)
+    return false;
+  else
+    return true;
 }
 
 void CVDPAU::Present()
