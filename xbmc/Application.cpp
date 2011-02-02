@@ -2008,9 +2008,9 @@ void CApplication::NewFrame()
   // We just posted another frame. Keep track and notify.
   SDL_mutexP(m_frameMutex);
   m_frameCount++;
-  SDL_mutexV(m_frameMutex);
 
   SDL_CondBroadcast(m_frameCond);
+  SDL_mutexV(m_frameMutex);
 #endif
 }
 
@@ -2155,8 +2155,8 @@ void CApplication::Render()
   SDL_mutexP(m_frameMutex);
   if(m_frameCount > 0 && decrement)
     m_frameCount--;
-  SDL_mutexV(m_frameMutex);
   SDL_CondBroadcast(m_frameCond);
+  SDL_mutexV(m_frameMutex);
 #endif
 }
 
