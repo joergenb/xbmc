@@ -680,7 +680,7 @@ bool CSettings::LoadSettings(const CStdString& strSettingsFile)
     int deinterlaceMode;
     bool deinterlaceModePresent = GetInteger(pElement, "deinterlacemode", deinterlaceMode, VS_DEINTERLACEMODE_OFF, VS_DEINTERLACEMODE_OFF, VS_DEINTERLACEMODE_FORCE);
     int interlaceMethod;
-    bool interlaceMethodPresent = GetInteger(pElement, "interlacemethod", interlaceMethod, VS_INTERLACEMETHOD_AUTO, VS_INTERLACEMETHOD_AUTO, VS_INTERLACEMETHOD_AUTO_ION);
+    bool interlaceMethodPresent = GetInteger(pElement, "interlacemethod", interlaceMethod, VS_INTERLACEMETHOD_AUTO, VS_INTERLACEMETHOD_AUTO, VS_INTERLACEMETHOD_DXVA_ANY);
     // For smooth conversion of settings stored before the deinterlaceMode existed
     if (!deinterlaceModePresent && interlaceMethodPresent)
     {
