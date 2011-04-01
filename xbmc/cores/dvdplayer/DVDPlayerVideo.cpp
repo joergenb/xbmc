@@ -44,6 +44,7 @@
 #include <numeric>
 #include <iterator>
 #include "utils/log.h"
+#include "DVDCodecs/Video/VDPAU.h"
 
 using namespace std;
 
@@ -935,7 +936,11 @@ void CDVDPlayerVideo::ProcessOverlays(DVDVideoPicture* pSource, YV12Image* pDest
 #endif
 #ifdef HAVE_LIBVDPAU
   else if(pSource->format == DVDVideoPicture::FMT_VDPAU || pSource->format == DVDVideoPicture::FMT_VDPAU_420)
+  {
+    if (pSource->vdpau)
+      pSource->vdpau->Present();
     g_renderManager.AddProcessor(pSource->vdpau);
+  }
 #endif
 #ifdef HAVE_LIBOPENMAX
   else if(pSource->format == DVDVideoPicture::FMT_OMXEGL)
@@ -1072,6 +1077,12 @@ int CDVDPlayerVideo::OutputPicture(DVDVideoPicture* pPicture, double pts)
     return EOS_ABORT;
   }
   maxfps = g_renderManager.GetMaximumFPS();
+
+  while (!g_renderManager.WaitVdpauFlip(50))
+  {
+    if (m_bStop)
+      return EOS_DROPPED;
+  }
 
   // check if our output will limit speed
   if(m_fFrameRate * abs(m_speed) / DVD_PLAYSPEED_NORMAL > maxfps*0.9)
@@ -1221,6 +1232,14 @@ int CDVDPlayerVideo::OutputPicture(DVDVideoPicture* pPicture, double pts)
       mDisplayField = FS_BOT;
   }
 
+//  static int counter = 0;
+//  counter++;
+//  if (counter > 1500)
+//  {
+//    CLog::Log(LOGNOTICE, "----------- dropped: %d",m_iDroppedFrames);
+//    counter = 0;
+//  }
+
   // copy picture to overlay
   YV12Image image;
 
@@ -1242,7 +1261,13 @@ int CDVDPlayerVideo::OutputPicture(DVDVideoPicture* pPicture, double pts)
   // tell the renderer that we've finished with the image (so it can do any
   // post processing before FlipPage() is called.)
   g_renderManager.ReleaseImage(index);
-  g_renderManager.FlipPage(CThread::m_bStop, (iCurrentClock + iSleepTime) / DVD_TIME_BASE, -1, mDisplayField);
+
+  if (pPicture->format == DVDVideoPicture::FMT_VDPAU || pPicture->format == DVDVideoPicture::FMT_VDPAU_420)
+  {
+    g_renderManager.FlipPage(CThread::m_bStop, (iCurrentClock + iSleepTime) / DVD_TIME_BASE, index, mDisplayField, true);
+  }
+  else
+    g_renderManager.FlipPage(CThread::m_bStop, (iCurrentClock + iSleepTime) / DVD_TIME_BASE, index, mDisplayField);
 
   return result;
 #else
