@@ -866,6 +866,8 @@ void CVDPAU::InitCSCMatrix(int Height)
 
 void CVDPAU::FiniVDPAUOutput()
 {
+  FiniOutputMethod();
+
   if (vdp_device == VDP_INVALID_HANDLE || !vdpauConfigured) return;
 
   CLog::Log(LOGNOTICE, " (VDPAU) %s", __FUNCTION__);
@@ -876,6 +878,7 @@ void CVDPAU::FiniVDPAUOutput()
   CheckStatus(vdp_st, __LINE__);
   decoder = VDP_INVALID_HANDLE;
 
+  CSingleLock lock(m_videoSurfaceSec);
   for(unsigned int i = 0; i < m_videoSurfaces.size(); i++)
   {
     vdp_st = vdp_video_surface_destroy(m_videoSurfaces[i]->surface);
@@ -884,8 +887,6 @@ void CVDPAU::FiniVDPAUOutput()
     free(m_videoSurfaces[i]);
   }
   m_videoSurfaces.clear();
-
-  FiniOutputMethod();
 }
 
 void CVDPAU::ReadFormatOf( PixelFormat fmt
@@ -1000,8 +1001,6 @@ bool CVDPAU::ConfigOutputMethod(AVCodecContext *avctx, AVFrame *pFrame)
       m_allOutPic[i].render = NULL;
       m_freeOutPic.push_back(&m_allOutPic[i]);
     }
-    m_presentPicture = m_flipBuffer[0] = m_flipBuffer[1] = m_flipBuffer[2] = NULL;
-    m_flipBufferIdx = 0;
 
     m_vdpauOutputMethod = OUTPUT_GL_INTEROP_YUV;
   }
@@ -1045,8 +1044,6 @@ bool CVDPAU::ConfigOutputMethod(AVCodecContext *avctx, AVFrame *pFrame)
                        tmpMaxOutputSurfaces,
                        NUM_OUTPUT_SURFACES);
 
-    m_presentPicture = m_flipBuffer[0] = m_flipBuffer[1] = m_flipBuffer[2] = NULL;
-    m_flipBufferIdx = 0;
     m_mixerCmd = 0;
 
     if (hasVdpauGlInterop)
@@ -1076,6 +1073,8 @@ bool CVDPAU::ConfigOutputMethod(AVCodecContext *avctx, AVFrame *pFrame)
 bool CVDPAU::FiniOutputMethod()
 {
   VdpStatus vdp_st;
+
+  CSingleLock lock(m_flipSec);
 
   // stop mixer thread
   StopThread();
@@ -1145,6 +1144,8 @@ bool CVDPAU::FiniOutputMethod()
     while (!m_usedOutPic.empty())
       m_usedOutPic.pop_front();
   }
+  m_presentPicture = m_flipBuffer[0] = m_flipBuffer[1] = m_flipBuffer[2] = NULL;
+  m_flipBufferIdx = 0;
 
   // force cleanup of opengl interop
   glInteropFinish = true;
@@ -1696,6 +1697,8 @@ void CVDPAU::Present()
 void CVDPAU::Flip()
 {
 //  CLog::Log(LOGNOTICE,"%s",__FUNCTION__);
+  CSingleLock lock(m_flipSec);
+
   m_flipBufferIdx = NextBuffer();
 
   if (m_flipBuffer[NextBuffer()])
@@ -2060,12 +2063,13 @@ void CVDPAU::GLFiniInterop()
 
 bool CVDPAU::GLMapSurface(OutputPicture *outPic)
 {
+  bool bReturn = true;
   if (outPic->DVDPic.format == DVDVideoPicture::FMT_VDPAU)
   {
     if (m_GlInteropStatus != OUTPUT_GL_INTEROP_RGB)
     {
       GLInitInterop();
-      GLRegisterOutputSurfaces();
+      bReturn = GLRegisterOutputSurfaces();
       m_GlInteropStatus = OUTPUT_GL_INTEROP_RGB;
     }
 //    glVDPAUMapSurfacesNV(1, &outPic->glVdpauSurface);
@@ -2077,13 +2081,13 @@ bool CVDPAU::GLMapSurface(OutputPicture *outPic)
       GLInitInterop();
       m_GlInteropStatus = OUTPUT_GL_INTEROP_YUV;
     }
-    GLRegisterVideoSurfaces(outPic);
+    bReturn = GLRegisterVideoSurfaces(outPic);
     GLVideoSurface surface = m_videoSurfaceMap[outPic->render->surface];
 //    glVDPAUMapSurfacesNV(1, &surface.glVdpauSurface);
     for (int i = 0; i < 4; i++)
       outPic->texture[i] = surface.texture[i];
   }
-  return true;
+  return bReturn;
 }
 
 bool CVDPAU::GLUnmapSurface(OutputPicture *outPic)
@@ -2110,23 +2114,28 @@ bool CVDPAU::GLRegisterOutputSurfaces()
     if (glGetError() != GL_NO_ERROR)
     {
       CLog::Log(LOGERROR, "CVDPAU::GLRegisterOutputSurfaces error register output surface");
+      return false;
     }
     glVDPAUSurfaceAccessNV(m_allOutPic[i].glVdpauSurface, GL_READ_ONLY);
     if (glGetError() != GL_NO_ERROR)
     {
       CLog::Log(LOGERROR, "CVDPAU::GLRegisterOutputSurfaces error setting access");
+      return false;
     }
     glVDPAUMapSurfacesNV(1, &m_allOutPic[i].glVdpauSurface);
     if (glGetError() != GL_NO_ERROR)
     {
       CLog::Log(LOGERROR, "CVDPAU::GLRegisterOutputSurfaces error mapping surface");
+      return false;
     }
   }
+  return true;
 }
 
 bool CVDPAU::GLRegisterVideoSurfaces(OutputPicture *outPic)
 {
   CSingleLock lock(m_videoSurfaceSec);
+  bool bError = false;
   if (m_videoSurfaces.size() != m_videoSurfaceMap.size())
   {
     for (int i = 0; i < m_videoSurfaces.size(); i++)
@@ -2139,24 +2148,30 @@ bool CVDPAU::GLRegisterVideoSurfaces(OutputPicture *outPic)
         if (glGetError() != GL_NO_ERROR)
         {
            CLog::Log(LOGERROR, "CVDPAU::GLRegisterVideoSurfaces error creating texture");
+           bError = true;
         }
         glVideoSurface.glVdpauSurface = glVDPAURegisterVideoSurfaceNV((GLvoid*)(m_videoSurfaces[i]->surface),
                                                   GL_TEXTURE_2D, 4, glVideoSurface.texture);
         if (glGetError() != GL_NO_ERROR)
         {
           CLog::Log(LOGERROR, "CVDPAU::GLRegisterVideoSurfaces error register video surface");
+          bError = true;
         }
         glVDPAUSurfaceAccessNV(glVideoSurface.glVdpauSurface, GL_READ_ONLY);
         if (glGetError() != GL_NO_ERROR)
         {
           CLog::Log(LOGERROR, "CVDPAU::GLRegisterVideoSurfaces error setting access");
+          bError = true;
         }
         glVDPAUMapSurfacesNV(1, &glVideoSurface.glVdpauSurface);
         if (glGetError() != GL_NO_ERROR)
         {
           CLog::Log(LOGERROR, "CVDPAU::GLRegisterVideoSurfaces error mapping surface");
+          bError = true;
         }
         m_videoSurfaceMap[m_videoSurfaces[i]->surface] = glVideoSurface;
+        if (bError)
+          return false;
         CLog::Log(LOGNOTICE, "CVDPAU::GLRegisterVideoSurfaces registered surface");
       }
     }
@@ -2171,6 +2186,8 @@ GLuint CVDPAU::GLGetSurfaceTexture(int plane, int field)
   GLuint glReturn = 0;
 
 #ifdef GL_NV_vdpau_interop
+
+  CSingleLock lock(m_flipSec);
 
   //check if current output method is valid
   if (m_GlInteropStatus == OUTPUT_GL_INTEROP_RGB)
@@ -2203,7 +2220,11 @@ GLuint CVDPAU::GLGetSurfaceTexture(int plane, int field)
   {
     if (!m_bsurfaceMapped)
     {
-      GLMapSurface(m_flipBuffer[m_flipBufferIdx]);
+      if (!GLMapSurface(m_flipBuffer[m_flipBufferIdx]))
+      {
+        glInteropFinish = true;
+        return 0;
+      }
       m_bsurfaceMapped = true;
     }
     if (plane == 0 && (field == 0))
@@ -2228,7 +2249,7 @@ GLuint CVDPAU::GLGetSurfaceTexture(int plane, int field)
     }
   }
   else
-    CLog::Log(LOGERROR, "CVDPAU::GLGetSurfaceTexture - no picture, index %d", m_flipBufferIdx);
+    CLog::Log(LOGWARNING, "CVDPAU::GLGetSurfaceTexture - no picture, index %d", m_flipBufferIdx);
 
 #endif
   return glReturn;

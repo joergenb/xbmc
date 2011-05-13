@@ -300,7 +300,7 @@ protected:
   OutputPicture *m_flipBuffer[3];
   int m_flipBufferIdx;
   unsigned int m_mixerCmd;
-  CCriticalSection m_mixerSec, m_outPicSec, m_videoSurfaceSec;
+  CCriticalSection m_mixerSec, m_outPicSec, m_videoSurfaceSec, m_flipSec;
   CEvent m_picSignal;
   CEvent m_msgSignal;
   bool m_bVdpauDeinterlacing;
