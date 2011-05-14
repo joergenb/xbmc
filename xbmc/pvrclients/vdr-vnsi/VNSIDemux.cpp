@@ -171,8 +171,9 @@ bool cVNSIDemux::SwitchChannel(const PVR_CHANNEL &channelinfo)
 
   m_channelinfo = channelinfo;
   m_Streams.iStreamCount  = 0;
+  m_VideoReady = channelinfo.bIsRadio ? true : false;
 
-  while (m_Streams.iStreamCount == 0 && !ConnectionLost())
+  while ((m_Streams.iStreamCount == 0 || !m_VideoReady) && !ConnectionLost())
   {
     DemuxPacket* pkg = Read();
     if(!pkg)
@@ -323,6 +324,10 @@ void cVNSIDemux::StreamChange(cResponsePacket *resp)
       m_Streams.stream[m_Streams.iStreamCount].strLanguage[2]= 0;
       m_Streams.stream[m_Streams.iStreamCount].strLanguage[3]= 0;
       m_Streams.stream[m_Streams.iStreamCount].iIdentifier = -1;
+
+      if (m_Streams.stream[m_Streams.iStreamCount].iHeight > 0 && m_Streams.stream[m_Streams.iStreamCount].iWidth > 0)
+        m_VideoReady = true;
+
       m_Streams.iStreamCount++;
     }
     else if(!strcmp(type, "H264"))
@@ -341,6 +346,10 @@ void cVNSIDemux::StreamChange(cResponsePacket *resp)
       m_Streams.stream[m_Streams.iStreamCount].strLanguage[2]= 0;
       m_Streams.stream[m_Streams.iStreamCount].strLanguage[3]= 0;
       m_Streams.stream[m_Streams.iStreamCount].iIdentifier = -1;
+
+      if (m_Streams.stream[m_Streams.iStreamCount].iHeight > 0 && m_Streams.stream[m_Streams.iStreamCount].iWidth > 0)
+        m_VideoReady = true;
+
       m_Streams.iStreamCount++;
     }
     else if(!strcmp(type, "DVBSUB"))

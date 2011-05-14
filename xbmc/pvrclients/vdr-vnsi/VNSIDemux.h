@@ -65,4 +65,5 @@ private:
   PVR_STREAM_PROPERTIES m_Streams;
   PVR_CHANNEL           m_channelinfo;
   SQuality              m_Quality;
+  bool                  m_VideoReady;
 };
