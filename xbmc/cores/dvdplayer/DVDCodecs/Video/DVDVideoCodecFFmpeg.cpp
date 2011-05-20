@@ -405,7 +405,7 @@ int CDVDVideoCodecFFmpeg::Decode(BYTE* pData, int iSize, double dts, double pts)
   // vdpau has pics in a queue and dropping should not be done in the middle
 #ifdef HAVE_LIBVDPAU
   int drop = m_pCodecContext->hurry_up;
-  if (!m_pHardware->AllowDecoderDrop())
+  if (m_pHardware && !m_pHardware->AllowDecoderDrop())
     m_pCodecContext->hurry_up = 0;
 #endif
   len = m_dllAvCodec.avcodec_decode_video2(m_pCodecContext, m_pFrame, &iGotPicture, &avpkt);
