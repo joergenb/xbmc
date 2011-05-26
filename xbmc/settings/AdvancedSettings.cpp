@@ -89,6 +89,10 @@ void CAdvancedSettings::Initialize()
   m_videoEnableHighQualityHwScalers = false;
   m_videoAutoScaleMaxFps = 30.0f;
   m_videoAllowMpeg4VDPAU = false;
+  m_videoVDPAUdeintHD = -1;
+  m_videoVDPAUdeintSD = -1;
+  m_videoVDPAUmaxHeight = -1;
+  m_videoVDPAUdeintSkipChromaHD = false;
   m_DXVACheckCompatibility = false;
   m_DXVACheckCompatibilityPresent = false;
   m_DXVAForceProcessorRenderer = true;
@@ -456,6 +460,10 @@ void CAdvancedSettings::ParseSettingsFile(const CStdString &file)
     XMLUtils::GetBoolean(pElement,"enablehighqualityhwscalers", m_videoEnableHighQualityHwScalers);
     XMLUtils::GetFloat(pElement,"autoscalemaxfps",m_videoAutoScaleMaxFps, 0.0f, 1000.0f);
     XMLUtils::GetBoolean(pElement,"allowmpeg4vdpau",m_videoAllowMpeg4VDPAU);
+    XMLUtils::GetInt(pElement,"vdpauHDdeint",m_videoVDPAUdeintHD);
+    XMLUtils::GetInt(pElement,"vdpauSDdeint",m_videoVDPAUdeintSD);
+    XMLUtils::GetInt(pElement,"vdpauMaxHeight",m_videoVDPAUmaxHeight);
+    XMLUtils::GetBoolean(pElement,"vdpauHDdeintSkipChroma",m_videoVDPAUdeintSkipChromaHD);
 
     TiXmlElement* pAdjustRefreshrate = pElement->FirstChildElement("adjustrefreshrate");
     if (pAdjustRefreshrate)

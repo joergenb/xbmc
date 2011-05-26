@@ -326,6 +326,13 @@ bool CVDPAU::MakePixmapGL(int index)
 
 void CVDPAU::SetWidthHeight(int width, int height)
 {
+  int vdpauMaxHeight = g_advancedSettings.m_videoVDPAUmaxHeight;
+  if (vdpauMaxHeight > 0 && height > vdpauMaxHeight)
+  {
+    width = MathUtils::round_int((double)width * vdpauMaxHeight / height);
+    height = vdpauMaxHeight;
+  }
+
   //pick the smallest dimensions, so we downscale with vdpau and upscale with opengl when appropriate
   //this requires the least amount of gpu memory bandwidth
   if (g_graphicsContext.GetWidth() < width || g_graphicsContext.GetHeight() < height || upScale)
@@ -495,6 +502,7 @@ void CVDPAU::CheckFeatures()
       tmpNoiseReduction = 0;
       tmpSharpness = 0;
       tmpPostProc = true;
+      tmpDeint = 0;
 
       VdpStatus vdp_st = VDP_STATUS_ERROR;
       vdp_st = vdp_video_mixer_create(vdp_device,
@@ -656,6 +664,23 @@ void CVDPAU::SetSharpness()
   CheckStatus(vdp_st, __LINE__);
 }
 
+void CVDPAU::SetDeintSkipChroma()
+{
+  VdpVideoMixerAttribute attribute[] = { VDP_VIDEO_MIXER_ATTRIBUTE_SKIP_CHROMA_DEINTERLACE};
+  VdpStatus vdp_st;
+
+  uint8_t val;
+  if (g_advancedSettings.m_videoVDPAUdeintSkipChromaHD && vid_height >= 720)
+    val = 1;
+  else
+    val = 0;
+
+  void const *values[]={&val};
+  vdp_st = vdp_video_mixer_set_attribute_values(videoMixer, ARSIZE(attribute), attribute, values);
+
+  CheckStatus(vdp_st, __LINE__);
+}
+
 void CVDPAU::SetHWUpscaling()
 {
 #ifdef VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1
@@ -676,10 +701,10 @@ EINTERLACEMETHOD CVDPAU::GetDeinterlacingMethod(bool log /* = false */)
   if (method == VS_INTERLACEMETHOD_AUTO)
   {
     int deint = -1;
-//    if (vid_height >= 720)
-//      deint = g_advancedSettings.m_videoVDPAUdeintHD;
-//    else
-//      deint = g_advancedSettings.m_videoVDPAUdeintSD;
+    if (vid_height >= 720)
+      deint = g_advancedSettings.m_videoVDPAUdeintHD;
+    else
+      deint = g_advancedSettings.m_videoVDPAUdeintSD;
 
     if (deint != -1)
     {
@@ -687,7 +712,7 @@ EINTERLACEMETHOD CVDPAU::GetDeinterlacingMethod(bool log /* = false */)
       {
         method = EINTERLACEMETHOD(deint);
         if (log)
-          CLog::Log(LOGNOTICE, "CVDPAU::GetDeinterlacingMethod: set de-interlacing to %d", deint);
+          CLog::Log(LOGNOTICE, "CVDPAU::GetDeinterlacingMethod: set de-interlacing to %d",  deint);
       }
       else
       {
@@ -706,8 +731,12 @@ void CVDPAU::SetDeinterlacing()
   if (videoMixer == VDP_INVALID_HANDLE)
     return;
 
+<<<<<<< HEAD
   EDEINTERLACEMODE   mode = g_settings.m_currentVideoSettings.m_DeinterlaceMode;
   EINTERLACEMETHOD method = g_settings.m_currentVideoSettings.m_InterlaceMethod;
+=======
+  EINTERLACEMETHOD method = GetDeinterlacingMethod(true);
+>>>>>>> f021f3c... vdpau: add advanced setting for deinterlacing method, skip chroma, output width/height
 
   VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL,
                                      VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL_SPATIAL,
@@ -748,6 +777,8 @@ void CVDPAU::SetDeinterlacing()
     }
   }
   CheckStatus(vdp_st, __LINE__);
+
+  SetDeintSkipChroma();
 }
 
 void CVDPAU::PostProcOff()
@@ -756,8 +787,6 @@ void CVDPAU::PostProcOff()
 
   if (videoMixer == VDP_INVALID_HANDLE)
     return;
-
-  EINTERLACEMETHOD method = g_settings.m_currentVideoSettings.m_InterlaceMethod;
 
   VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL,
                                      VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL_SPATIAL,
