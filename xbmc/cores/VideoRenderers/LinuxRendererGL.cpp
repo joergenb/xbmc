@@ -715,13 +715,6 @@ void CLinuxRendererGL::FlipPage(int source)
 
   m_buffers[m_iYV12RenderBuffer].flipindex = ++m_flipindex;
 
-#ifdef HAVE_LIBVDPAU  
-  if (((m_renderMethod & RENDER_VDPAU)
-      || CONF_FLAGS_FORMAT_MASK(m_iFlags) == CONF_FLAGS_FORMAT_VDPAU_420)
-      && m_buffers[m_iYV12RenderBuffer].vdpau)
-    m_buffers[m_iYV12RenderBuffer].vdpau->Present();
-#endif
-
   return;
 }
 
@@ -1088,7 +1081,7 @@ void CLinuxRendererGL::Render(DWORD flags, int renderBuffer)
 #ifdef HAVE_LIBVDPAU
   CVDPAU   *vdpau = m_buffers[renderBuffer].vdpau;
   if (vdpau)
-    if (!vdpau->IsBufferValid())
+    if (!vdpau->IsBufferValid(renderBuffer))
     {
       SetEvent(m_eventTexturesDone[renderBuffer]);
       return;
@@ -1469,7 +1462,7 @@ void CLinuxRendererGL::RenderVDPAU(int index, int field)
 
   glBindTexture(m_textureTarget, plane.id);
 
-  vdpau->BindPixmap();
+//  vdpau->BindPixmap();
 
   // Try some clamping or wrapping
   glTexParameteri(m_textureTarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1527,7 +1520,7 @@ void CLinuxRendererGL::RenderVDPAU(int index, int field)
   if (m_pVideoFilterShader)
     m_pVideoFilterShader->Disable();
 
-  vdpau->ReleasePixmap();
+  vdpau->ReleasePixmap(index);
 
   glBindTexture (m_textureTarget, 0);
   glDisable(m_textureTarget);
@@ -2244,15 +2237,26 @@ void CLinuxRendererGL::UploadVDPAUTexture(int index)
 
   glEnable(m_textureTarget);
 
-  if (fields[0][1].flipindex != flipindex && vdpau->SetTexture(0,0))
+  int ret = vdpau->SetTexture(0,0,index);
+  if (ret == 1)
   {
     fields[0][1].id = vdpau->GetTexture();
     fields[0][1].flipindex = flipindex;
   }
-  else if (fields[0][1].flipindex != flipindex)
+  // pixmap
+  else if (ret == 0)
   {
     fields[0][1].id = plane.id;
+    fields[0][1].flipindex = flipindex;
+    glBindTexture(m_textureTarget, plane.id);
+    vdpau->BindPixmap(index);
   }
+  else
+  {
+    fields[0][1].id = plane.id;
+    CLog::Log(LOGWARNING, "CLinuxRendererGL::UploadVDPAUTexture - error getting texture");
+  }
+
   glPixelStorei(GL_UNPACK_ALIGNMENT,1); //what's this for?
   glDisable(m_textureTarget);
 
@@ -2390,7 +2394,7 @@ void CLinuxRendererGL::UploadVDPAUTexture420(int index)
   {
     for (int p=0;p<2;p++)
     {
-      if (fields[f][p].flipindex != flipindex && vdpau->SetTexture(p,f))
+      if (vdpau->SetTexture(p,f,index) == 1)
       {
         fields[f][p].id = vdpau->GetTexture();
         fields[f][p].flipindex = flipindex;
@@ -2403,7 +2407,7 @@ void CLinuxRendererGL::UploadVDPAUTexture420(int index)
         glBindTexture(m_textureTarget,0);
         VerifyGLState();
       }
-      else if (fields[f][p].flipindex != flipindex)
+      else
       {
         fields[m_currentField][p].id = plane.id;
         CLog::Log(LOGERROR, "CLinuxRendererGL::UploadVDPAUTexture420 error");
