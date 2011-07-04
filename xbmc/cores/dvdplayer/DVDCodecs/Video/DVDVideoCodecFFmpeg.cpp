@@ -325,7 +325,7 @@ void CDVDVideoCodecFFmpeg::SetDropState(bool bDrop)
     //  2 seem to be to high.. it causes video to be ruined on following images
     if( bDrop )
     {
-      if (m_pHardware && m_pHardware->AllowFrameDropping())
+      if (m_pHardware && !m_pHardware->AllowFrameDropping())
       {
         m_pHardware->SetDropState(true);
       }
@@ -375,6 +375,16 @@ unsigned int CDVDVideoCodecFFmpeg::SetFilters(unsigned int flags)
   return flags;
 }
 
+bool CDVDVideoCodecFFmpeg::WaitGetPicture()
+{
+  if (m_pHardware && !m_picSignal.WaitMSec(500))
+  {
+    CLog::Log(LOGWARNING, "CDVDVideoCodecFFmpeg::WaitGetPicture - timed out");
+    return true;
+  }
+  return false;
+}
+
 union pts_union
 {
   double  pts_d;
@@ -398,6 +408,8 @@ static double pts_itod(int64_t pts)
 int CDVDVideoCodecFFmpeg::Decode(BYTE* pData, int iSize, double dts, double pts)
 {
   int iGotPicture = 0, len = 0;
+
+  m_picSignal.Reset();
 
   if (!m_pCodecContext)
     return VC_ERROR;
@@ -658,7 +670,11 @@ bool CDVDVideoCodecFFmpeg::GetPictureCommon(DVDVideoPicture* pDvdVideoPicture)
 bool CDVDVideoCodecFFmpeg::GetPicture(DVDVideoPicture* pDvdVideoPicture)
 {
   if(m_pHardware)
-    return m_pHardware->GetPicture(m_pCodecContext, m_pFrame, pDvdVideoPicture);
+  {
+    bool bReturn = m_pHardware->GetPicture(m_pCodecContext, m_pFrame, pDvdVideoPicture);
+    m_picSignal.Set();
+    return bReturn;
+  }
 
   if(!GetPictureCommon(pDvdVideoPicture))
     return false;
