@@ -656,6 +656,14 @@ void CDVDPlayerVideo::Process()
           while (bGotMsg)
           {
             iResult = fromMsg.iResult;
+
+            if( iResult & EOS_FLUSH )
+            {
+              iDecoderState = VC_FLUSHED;
+              m_pVideoOutput->Dispose();
+              break;
+            }
+
             if(m_started == false)
             {
               m_codecname = m_pVideoCodec->GetName();
@@ -1043,7 +1051,8 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts)
     }
 
     CLog::Log(LOGDEBUG,"%s - change configuration. %dx%d. framerate: %4.2f. format: %s",__FUNCTION__,pPicture->iWidth, pPicture->iHeight, m_bFpsInvalid ? 0.0 : m_fFrameRate, formatstr.c_str());
-    if(!g_renderManager.Configure(pPicture->iWidth, pPicture->iHeight, pPicture->iDisplayWidth, pPicture->iDisplayHeight, m_bFpsInvalid ? 0.0 : m_fFrameRate, flags, pPicture->extended_format))
+    bool bResChange;
+    if(!g_renderManager.Configure(pPicture->iWidth, pPicture->iHeight, pPicture->iDisplayWidth, pPicture->iDisplayHeight, m_bFpsInvalid ? 0.0 : m_fFrameRate, flags, pPicture->extended_format, bResChange))
     {
       CLog::Log(LOGERROR, "%s - failed to configure renderer", __FUNCTION__);
       return EOS_ABORT;
@@ -1061,6 +1070,15 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts)
     m_output.color_primaries = pPicture->color_primaries;
     m_output.color_transfer = pPicture->color_transfer;
     m_output.color_range = pPicture->color_range;
+
+    if (bResChange)
+    {
+      if (m_pVideoCodec->HwFreeResources())
+      {
+        CLog::Log(LOGNOTICE,"CDVDPlayerVideo::OutputPicture - freed hw resources");
+        return EOS_FLUSH;
+      }
+    }
   }
 
   double maxfps  = 60.0;
