@@ -45,6 +45,7 @@
 #include <numeric>
 #include <iterator>
 #include "utils/log.h"
+#include "utils/TimeUtils.h"
 #include "DVDPlayerVideoOutput.h"
 #include "Application.h"
 
@@ -662,9 +663,11 @@ void CDVDPlayerVideo::Process()
           m_pVideoOutput->SendMessage(toMsg);
 
           // wait until output stage has called GetPicture
+          int64_t wgt = CurrentHostCounter();
           lock.Leave();
           bool bWait = m_pVideoCodec->WaitGetPicture();
           lock.Enter();
+          CLog::Log(LOGDEBUG,"CDVDPlayerVideo::Process WaitGetPicture() DUR: %"PRId64"", CurrentHostCounter() - wgt);
 
           // wait for message from output
           // block it decoder has no buffer
@@ -1222,6 +1225,7 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts)
   {
     m_iDroppedRequest = 0;
   }
+m_iLateFrames = 0;
 
   if( m_speed < 0 )
   {
