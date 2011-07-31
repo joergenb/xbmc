@@ -1211,7 +1211,6 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts)
   {
     m_iDroppedRequest = 0;
   }
-m_iLateFrames = 0;
 
   if( m_speed < 0 )
   {
