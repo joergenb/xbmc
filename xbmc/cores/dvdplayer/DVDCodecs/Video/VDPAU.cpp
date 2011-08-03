@@ -107,6 +107,7 @@ CVDPAU::CVDPAU() : CThread("CVDPAU")
   picAge.b_age    = picAge.ip_age[0] = picAge.ip_age[1] = 256*256*256*64;
   vdpauConfigured = false;
   recover = false;
+  clearedDown = false;
   m_mixerfield = VDP_VIDEO_MIXER_PICTURE_STRUCTURE_FRAME;
   m_mixerstep  = 0;
 
@@ -478,22 +479,26 @@ void CVDPAU::ReleasePixmap(int flipBufferIdx)
 
 bool CVDPAU::CheckRecover(bool force)
 {
+  bool bReturn = false;
   if (recover || force)
   {
     glInteropFinish = true;
 
-    CLog::Log(LOGNOTICE,"Attempting recovery");
+    if (!clearedDown)
+    {
+      CLog::Log(LOGNOTICE,"Attempting recovery");
 
-    FiniVDPAUOutput();
-    FiniVDPAUProcs();
+      FiniVDPAUOutput();
+      FiniVDPAUProcs();
 
-    recover = false;
+      bReturn = true;
+    }
 
     InitVDPAUProcs();
-
-    return true;
+    recover = false;
+    clearedDown = false;
   }
-  return false;
+  return bReturn;
 }
 
 bool CVDPAU::IsVDPAUFormat(PixelFormat format)
@@ -1852,6 +1857,7 @@ bool CVDPAU::FreeResources(bool test /* = false */)
     return true;
 
   recover = true;
+  clearedDown = true;
   glInteropFinish = true;
 
   CLog::Log(LOGNOTICE,"CVDPAU::FreeResources");
@@ -2418,6 +2424,8 @@ GLuint CVDPAU::GLGetSurfaceTexture(int plane, int field, int flipBufferIdx)
 {
   GLuint glReturn = 0;
 
+#ifdef GL_NV_vdpau_interop
+
   //check if current output method is valid
   if (m_GlInteropStatus != m_vdpauOutputMethod)
   {
@@ -2461,6 +2469,8 @@ GLuint CVDPAU::GLGetSurfaceTexture(int plane, int field, int flipBufferIdx)
   }
   else
     CLog::Log(LOGWARNING, "CVDPAU::GLGetSurfaceTexture - no picture, index %d", flipBufferIdx);
+
+#endif
 
   return glReturn;
 }
