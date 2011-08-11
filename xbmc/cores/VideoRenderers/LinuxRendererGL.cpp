@@ -223,7 +223,7 @@ bool CLinuxRendererGL::ValidateRenderer()
 
 void CLinuxRendererGL::ManageTextures()
 {
-  m_NumYV12Buffers = 2;
+  m_NumYV12Buffers = 3;
   //m_iYV12RenderBuffer = 0;
   return;
 }
@@ -720,7 +720,7 @@ unsigned int CLinuxRendererGL::PreInit()
   m_resolution = RES_PAL_4x3;
 
   m_iYV12RenderBuffer = 0;
-  m_NumYV12Buffers = 2;
+  m_NumYV12Buffers = 3;
 
   // setup the background colour
   m_clearColour = (float)(g_advancedSettings.m_videoBlackBarColour & 0xff) / 0xff;
