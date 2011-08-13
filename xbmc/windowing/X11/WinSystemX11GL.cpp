@@ -43,7 +43,27 @@ CWinSystemX11GL::~CWinSystemX11GL()
 
 bool CWinSystemX11GL::PresentRenderImpl(const CDirtyRegionList& dirty)
 {
-  if(m_iVSyncMode == 3)
+  if(m_iVSyncMode == 2)
+  {
+    static unsigned int last = 0;
+    unsigned int now;
+    if(m_glXGetVideoSyncSGI(&now) != 0)
+      CLog::Log(LOGERROR, "%s - glXGetVideoSyncSGI - Failed to get current retrace count", __FUNCTION__);
+
+    if (now == last)
+    {
+      if (m_glXWaitVideoSyncSGI(2, (last + 1) % 2, &now) != 0)
+        CLog::Log(LOGERROR, "%s - glXWaitVideoSyncSGI - Returned error", __FUNCTION__);
+      if(m_glXGetVideoSyncSGI(&now) != 0)
+        CLog::Log(LOGERROR, "%s - glXGetVideoSyncSGI - Failed to get current retrace count", __FUNCTION__);
+      last = now + 1;
+    }
+    else
+      last = now;
+
+    glXSwapBuffers(m_dpy, m_glWindow);
+  }
+  else if(m_iVSyncMode == 3)
   {
     glFinish();
     unsigned int before = 0, after = 0;
@@ -235,7 +255,6 @@ bool CWinSystemX11GL::CreateNewWindow(const CStdString& name, bool fullScreen, R
     m_glXSwapIntervalMESA = (int (*)(int))glXGetProcAddress((const GLubyte*)"glXSwapIntervalMESA");
   else
     m_glXSwapIntervalMESA = NULL;
-
 
   return true;
 }
