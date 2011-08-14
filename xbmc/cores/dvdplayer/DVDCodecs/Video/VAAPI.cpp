@@ -358,7 +358,9 @@ bool CDecoder::EnsureContext(AVCodecContext *avctx)
     else
       m_refs = 2;
   }
-  return EnsureSurfaces(avctx, m_refs + 3);
+  // number of reference + 3 renderbuffers + Holder
+  // an extra one should not harm
+  return EnsureSurfaces(avctx, m_refs + 5);
 }
 
 bool CDecoder::EnsureSurfaces(AVCodecContext *avctx, unsigned n_surfaces_count)
