@@ -732,6 +732,7 @@ void CLinuxRendererGL::DrawBlackBars()
 
 void CLinuxRendererGL::FlipPage(int source)
 {
+  // PBOs are not used by vdpau or vaapi
   UnBindPbo(m_buffers[m_iYV12RenderBuffer]);
 
   if( source >= 0 && source < m_NumYV12Buffers )
@@ -773,7 +774,7 @@ void CLinuxRendererGL::LogBuffers()
   CLog::Log(LOGNOTICE, "-------------- display: %d", m_iDisplayedRenderBuffer);
 }
 
-int CLinuxRendererGL::GetNextBufferIndex()
+int CLinuxRendererGL::GetNextFreeBufferIndex()
 {
   if (!m_bValidated)
     return -1;
@@ -3414,16 +3415,17 @@ void CLinuxRendererGL::UnBindPbo(YUVBUFFER& buff)
 #ifdef HAVE_LIBVDPAU
 void CLinuxRendererGL::AddProcessor(CVDPAU* vdpau)
 {
-  YUVBUFFER &buf = m_buffers[NextYV12Texture()];
+  YUVBUFFER &buf = m_buffers[m_iNextRenderBuffer];
   SAFE_RELEASE(buf.vdpau);
-  buf.vdpau = (CVDPAU*)vdpau->Acquire();
+  if (vdpau)
+    buf.vdpau = (CVDPAU*)vdpau->Acquire();
 }
 #endif
 
 #ifdef HAVE_LIBVA
 void CLinuxRendererGL::AddProcessor(VAAPI::CHolder& holder)
 {
-  YUVBUFFER &buf = m_buffers[NextYV12Texture()];
+  YUVBUFFER &buf = m_buffers[m_iNextRenderBuffer];
   buf.vaapi.surface = holder.surface;
 }
 #endif
