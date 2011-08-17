@@ -736,7 +736,7 @@ int CXBMCRenderManager::AddVideoPicture(DVDVideoPicture& pic, int source, double
 //  m_pClock = clock;
 
   YV12Image image;
-  source = m_pRenderer->GetNextBufferIndex();
+  source = m_pRenderer->GetNextFreeBufferIndex();
   if (source < 0)
   {
     CLog::Log(LOGERROR, "CXBMCRenderManager::AddVideoPicture - error getting next buffer");
@@ -763,9 +763,13 @@ int CXBMCRenderManager::AddVideoPicture(DVDVideoPicture& pic, int source, double
   }
 #ifdef HAVE_LIBVDPAU
   else if(pic.format == DVDVideoPicture::FMT_VDPAU || pic.format == DVDVideoPicture::FMT_VDPAU_420)
-      if (pic.vdpau)
-        pic.vdpau->Present(index);
-    m_pRenderer->AddProcessor(pic.vdpau);
+  {
+    if (pic.vdpau)
+    {
+      m_pRenderer->AddProcessor(pic.vdpau);
+      pic.vdpau->Present(index);
+    }
+  }
 #endif
 #ifdef HAVE_LIBOPENMAX
   else if(pic.format == DVDVideoPicture::FMT_OMXEGL)
