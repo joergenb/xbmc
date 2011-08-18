@@ -89,12 +89,12 @@ long COverlayMainThread::Release()
 CRenderer::CRenderer()
 {
   m_render = 0;
-  m_decode = (m_render + 1) % 2;
+  m_decode = (m_render + 1) % 3;
 }
 
 CRenderer::~CRenderer()
 {
-  for(int i = 0; i < 2; i++)
+  for(int i = 0; i < 3; i++)
     Release(m_buffers[i]);
 }
 
@@ -154,7 +154,7 @@ void CRenderer::Flush()
 {
   CSingleLock lock(m_section);
 
-  for(int i = 0; i < 2; i++)
+  for(int i = 0; i < 3; i++)
     Release(m_buffers[i]);
 
   Release(m_cleanup);
@@ -165,7 +165,7 @@ void CRenderer::Flip()
   CSingleLock lock(m_section);
 
   m_render = m_decode;
-  m_decode =(m_decode + 1) % 2;
+  m_decode =(m_decode + 1) % 3;
 
   Release(m_buffers[m_decode]);
 }

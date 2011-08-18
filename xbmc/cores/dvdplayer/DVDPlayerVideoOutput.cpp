@@ -29,6 +29,7 @@
 #include "DVDCodecs/Video/DVDVideoPPFFmpeg.h"
 #include "cores/VideoRenderers/RenderManager.h"
 #include "windowing/WindowingFactory.h"
+#include "Application.h"
 
 CDVDPlayerVideoOutput::CDVDPlayerVideoOutput(CDVDPlayerVideo *videoplayer)
 : CThread("Video Output Thread")
@@ -173,36 +174,51 @@ void CDVDPlayerVideoOutput::Process()
       ToOutputMessage toMsg = m_toOutputMessage.front();
       m_toOutputMessage.pop();
 
-      bool gotPic;
+      bool newPic = false;
+      bool lastPic = false;
       if (toMsg.bLastPic)
       {
-        m_picture.iFlags &= ~DVP_FLAG_INTERLACED;
-        m_picture.iFlags |= DVP_FLAG_NOSKIP;
-        gotPic = false;
+        lastPic = true;
       }
       else
-        gotPic = GetPicture(toMsg, fromMsg);
+        newPic = GetPicture(toMsg, fromMsg);
       lock.Leave();
 
-      if (gotPic)
+      if (newPic || lastPic)
       {
         if (m_pVideoPlayer->CheckRenderConfig(&m_picture))
         {
           fromMsg.iResult = EOS_CONFIGURE;
           m_configuring = true;
         }
-        else
+
+        if (!m_configuring)
         {
-          fromMsg.iResult = m_pVideoPlayer->OutputPicture(&m_picture,m_pts);
-          // guess next frame pts. iDuration is always valid
-          if (toMsg.iSpeed != 0)
-            m_pts += m_picture.iDuration * toMsg.iSpeed / abs(toMsg.iSpeed);
+          // call ProcessOverlays here
+          m_pVideoPlayer->ProcessOverlays(&m_picture,m_pts);
+
+          if (newPic)
+          {
+            fromMsg.iResult = m_pVideoPlayer->OutputPicture(&m_picture,m_pts);
+          }
         }
 
-        lock.Enter();
-        m_fromOutputMessage.push(fromMsg);
-        lock.Leave();
-        m_fromMsgSignal.Set();
+        // signal new frame to application
+        g_application.NewFrame();
+
+        // guess next frame pts. iDuration is always valid
+        // required for pics with no pts value
+        if (toMsg.iSpeed != 0)
+          m_pts += m_picture.iDuration * toMsg.iSpeed / abs(toMsg.iSpeed);
+
+        // no respose message required for last pic
+        if (!lastPic)
+        {
+          lock.Enter();
+          m_fromOutputMessage.push(fromMsg);
+          lock.Leave();
+          m_fromMsgSignal.Set();
+        }
       }
     }
     else

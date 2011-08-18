@@ -124,7 +124,7 @@ namespace OVERLAY {
     void      Release(SElementV& list);
 
     CCriticalSection m_section;
-    SElementV        m_buffers[2];
+    SElementV        m_buffers[3];
     int              m_decode;
     int              m_render;
 
