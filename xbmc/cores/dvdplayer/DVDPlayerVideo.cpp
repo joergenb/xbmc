@@ -392,12 +392,15 @@ void CDVDPlayerVideo::Process()
         m_stalled = true;
         pts+= frametime*4;
 //This will set the pts for a different (older) picture, won't it?
+        // drive pts for overlays (still frames)
         m_pVideoOutput->SetPts(m_pVideoOutput->GetPts() + frametime*4);
       }
 
       //Waiting timed out, output last picture
-      if( picture.iFlags & DVP_FLAG_ALLOCATED )
-      {
+      // last picture is in render buffer, just don't flip
+      // only flip overlays
+//      if( picture.iFlags & DVP_FLAG_ALLOCATED )
+//      {
         //Remove interlaced flag before outputting
         //no need to output this as if it was interlaced
 //        picture.iFlags &= ~DVP_FLAG_INTERLACED;
@@ -405,13 +408,14 @@ void CDVDPlayerVideo::Process()
 //        OutputPicture(&picture, pts);
 //        pts+= frametime;
 //This will set the pts for a different (older) picture, won't it?
+        // drive pts for overlays
         m_pVideoOutput->SetPts(m_pVideoOutput->GetPts() + frametime);
 
         ToOutputMessage toMsg;
         toMsg.bLastPic = true;
         toMsg.iSpeed = m_speed;
         m_pVideoOutput->SendMessage(toMsg);
-      }
+//      }
 
       continue;
     }
@@ -1414,6 +1418,9 @@ void CDVDPlayerVideo::Flush()
 #ifdef HAS_VIDEO_PLAYBACK
 void CDVDPlayerVideo::ProcessOverlays(DVDVideoPicture* pSource, double pts)
 {
+  // maybe this is not really needed
+  CSingleLock lock(m_criticalSection);
+
   // remove any overlays that are out of time
   m_pOverlayContainer->CleanUp(pts - m_iSubtitleDelay);
 
@@ -1761,7 +1768,7 @@ int CDVDPlayerVideo::OutputPicture(DVDVideoPicture* pPicture, double pts)
       mDisplayField = FS_BOT;
   }
 
-  ProcessOverlays(pPicture, pts);
+//  ProcessOverlays(pPicture, pts);
   AutoCrop(pPicture);
 
   int playspeed = m_speed;

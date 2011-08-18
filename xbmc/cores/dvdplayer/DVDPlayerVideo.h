@@ -99,6 +99,10 @@ public:
   bool CheckRenderConfig(const DVDVideoPicture* src);
   void ResumeAfterRefreshChange();
 
+#ifdef HAS_VIDEO_PLAYBACK
+  void ProcessOverlays(DVDVideoPicture* pSource, double pts);
+#endif
+
   // classes
   CDVDMessageQueue m_messageQueue;
   CDVDMessageQueue& m_messageParent;
@@ -124,9 +128,6 @@ protected:
   int CalcDropRequirement();
   void ResetDropInfo();
 
-#ifdef HAS_VIDEO_PLAYBACK
-  void ProcessOverlays(DVDVideoPicture* pSource, double pts);
-#endif
   void ProcessVideoUserData(DVDVideoUserData* pVideoUserData, double pts);
 
   double m_iCurrentPts; // last pts displayed
