@@ -234,6 +234,7 @@ void CDVDPlayerVideo::OpenStream(CDVDStreamInfo &hint, CDVDVideoCodec* codec)
                       g_guiSettings.GetBool("videoplayer.adjustrefreshrate");
   ResetFrameRateCalc();
 
+  ResetDropInfo();
 
 //  m_iDroppedRequest = 0;
 //  m_iLateFrames = 0;
