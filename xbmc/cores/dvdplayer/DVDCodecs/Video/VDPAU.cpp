@@ -504,7 +504,6 @@ void CVDPAU::BindPixmap(int flipBufferIdx)
     
     m_flipBuffer[flipBufferIdx]->bound = true;
     lock.Leave();
-int64_t prev = CurrentHostCounter();
     if (bound)
       glXReleaseTexImageEXT(m_Display, glPixmap, GLX_FRONT_LEFT_EXT);
     glXBindTexImageEXT(m_Display, glPixmap, GLX_FRONT_LEFT_EXT, NULL);
@@ -1733,9 +1732,9 @@ bool CVDPAU::QueueIsFull()
      int msgsFactor = m_bVdpauDeinterlacing ? 2 : 1;
 
      int estimatedPicQLength = iNotFreePics + (msgsFactor * (msgs + 2));
-//CLog::Log(LOGDEBUG,"ASB: CVDPAU::QueueIsFull estimatedPicQLength: %i iNotFreePics: %i iFreePics: %i", estimatedPicQLength, iNotFreePics, iFreePics);
      if (estimatedPicQLength >= MAX_PIC_Q_LENGTH || iFreePics < 2)
-        return true; // buffers are full
+
+     return true; // buffers are full
   }
   return false;
 }
@@ -1905,7 +1904,6 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bDrain)
           m_freeOutPic.push_back(m_usedOutPic.front());
           m_usedOutPic.pop_front();
           lock.Leave();
-CLog::Log(LOGDEBUG,"ASB: CVDPAU::Decode dropping usedPic at presentation stage");
           retval =  VC_DROPPED | VC_PRESENTDROP;
           dropped = true;
           continue;
@@ -2186,7 +2184,7 @@ void CVDPAU::Present(int flipBufferIdx)
   }
 
   m_flipBuffer[flipBufferIdx] = m_presentPicture;
-//CLog::Log(LOGDEBUG,"ASB: CVDPAU Present set flipbuffer flipBufferIdx: %i m_flipBuffer[flipBufferIdx]: %u", flipBufferIdx, (unsigned int)m_flipBuffer[flipBufferIdx]);
+
   m_presentPicture = NULL;
 
 }
@@ -2296,7 +2294,6 @@ void CVDPAU::Process()
        // allow to drain by one if full input, by inserting a null msg
        if (cmd & MIXER_CMD_DRAIN && m_mixerInput.size() > 2 )
        {
-CLog::Log(LOGDEBUG,"ASB: CVDPAU::Process mixer drain requested");
           msg.render = NULL;
           m_mixerInput.push_front(msg);
        }
