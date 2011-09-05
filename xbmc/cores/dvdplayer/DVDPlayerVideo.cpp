@@ -349,6 +349,7 @@ void CDVDPlayerVideo::Process()
 
   bool bRequestDrop = false;
   bool bHurryUpDecode = false;
+  bool bFreeDecoderBuffer = true;
 
   m_videoStats.Start();
   m_refreshChanging = false;
@@ -360,6 +361,11 @@ void CDVDPlayerVideo::Process()
     int iPriority = (m_speed == DVD_PLAYSPEED_PAUSE && m_started) ? 1 : 0;
     if (m_refreshChanging)
       iPriority = 20;
+    if (!bFreeDecoderBuffer)
+    {
+      iPriority = 1;
+      iQueueTimeOut = 1;
+    }
 
     lock.Leave();
     CDVDMsg* pMsg;
@@ -372,7 +378,14 @@ void CDVDPlayerVideo::Process()
       ret = m_messageQueue.Get(&pMsg, timeout, iPriority);
       if (ret != MSGQ_TIMEOUT)
          break;
+      else if (!bFreeDecoderBuffer)
+      {
+        pMsg = new CDVDMsg(CDVDMsg::NONE);
+        ret = MSGQ_OK;
+      }
     }
+
+    bFreeDecoderBuffer = true;
 
     if (MSGQ_IS_ERROR(ret) || ret == MSGQ_ABORT)
     {
@@ -393,23 +406,23 @@ void CDVDPlayerVideo::Process()
       if( !m_stalled )
       {
         if(m_started)
-          CLog::Log(LOGINFO, "CDVDPlayerVideo - Stillframe detected, switching to forced %f fps", m_fFrameRate);
+          CLog::Log(LOGNOTICE, "CDVDPlayerVideo - Stillframe detected, switching to forced %f fps", m_fFrameRate);
         m_stalled = true;
         pts+= frametime*4;
         // drive pts for overlays (still frames)
         m_pVideoOutput->SetPts(m_pVideoOutput->GetPts() + frametime*4);
       }
       else 
+      {
         // drive pts for overlays
         m_pVideoOutput->SetPts(m_pVideoOutput->GetPts() + frametime);
-      if (m_started)
-      {
-        ToOutputMessage toMsg;
-        toMsg.bLastPic = true;
-        toMsg.iSpeed = m_speed;
-CLog::Log(LOGDEBUG, "ASB CDVDPlayerVideo -ret == MSGQ_TIMEOUT sending toMsg.bLastPic = true");
-        m_pVideoOutput->SendMessage(toMsg);
       }
+
+      // display last pic e.g. after decoder was flushed
+      ToOutputMessage toMsg;
+      toMsg.bLastPic = true;
+      toMsg.iSpeed = m_speed;
+      m_pVideoOutput->SendMessage(toMsg);
 
       continue;
     }
@@ -539,7 +552,7 @@ CLog::Log(LOGDEBUG, "ASB CDVDPlayerVideo -ret == MSGQ_TIMEOUT sending toMsg.bLas
       m_streamEOF = true;
     }
 
-    if (pMsg->IsType(CDVDMsg::DEMUXER_PACKET) || m_streamEOF)
+    if (pMsg->IsType(CDVDMsg::DEMUXER_PACKET) || pMsg->IsType(CDVDMsg::NONE) || m_streamEOF)
     {
       int bPacket = pMsg->IsType(CDVDMsg::DEMUXER_PACKET) ? true : false;
       bRequestDrop = false; //reset
@@ -768,10 +781,9 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo about to deliver to m_pVideoCodec->Dec
         // TODO: we want to get EOS_CONFIGURE messages immediately at start (while output thread should block until reconfigured)
         FromOutputMessage fromMsg;
         bool msgwait = false;
-        if (!m_started && (iDecoderState & VC_PICTURE)) //first picture output we wait for a reply to get reconfigured early
-        {
-           msgwait = true;
-        }
+        //first picture output we wait for a reply to get reconfigured early
+        if (!m_started && (iDecoderState & VC_PICTURE))
+          msgwait = true;
         bool bGotMsg = m_pVideoOutput->GetMessage(fromMsg, msgwait);
         int iResult = 0;
         if (bGotMsg)
@@ -796,8 +808,8 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo about to deliver to m_pVideoCodec->Dec
                                                                     m_output.height,
                                                                     m_bFpsInvalid ? 0.0 : m_output.framerate,
                                                                     m_formatstr.c_str());
-              bool bResChange;
-              if(!g_renderManager.Configure(m_output.width,
+             bool bResChange;
+             if(!g_renderManager.Configure(m_output.width,
                                             m_output.height,
                                             m_output.dwidth,
                                             m_output.dheight,
@@ -805,9 +817,9 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo about to deliver to m_pVideoCodec->Dec
                                             m_output.flags,
                                             m_output.extended_format,
                                             bResChange))
-              {
-                CLog::Log(LOGERROR, "%s - failed to configure renderer", __FUNCTION__);
-                //TODO: what should we do now?
+             {
+               CLog::Log(LOGERROR, "%s - failed to configure renderer", __FUNCTION__);
+               //TODO: what should we do now?
              }
              lock.Leave();
 
@@ -856,6 +868,13 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo about to deliver to m_pVideoCodec->Dec
            }
         }
 
+        // wait if decoder buffers are full or codec does not support buffering
+        if (!m_pVideoCodec->WaitForFreeBuffer())
+        {
+          bFreeDecoderBuffer = false;
+          break;
+        }
+
         //if (iDecoderState & VC_FLUSHED)
         //  continue;
 
@@ -881,8 +900,8 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo about to deliver to m_pVideoCodec->Dec
         m_pVideoCodec->SetDropState(bRequestDrop);
         m_pVideoCodec->SetDropHint(iDropHint);
         iDecoderState = m_pVideoCodec->Decode(NULL, 0, DVD_NOPTS_VALUE, DVD_NOPTS_VALUE);
-        if (!(iDecoderState & VC_BUFFER) && !(iDecoderState & VC_PICTURE))
-          Sleep(1);
+//        if (!(iDecoderState & VC_BUFFER) && !(iDecoderState & VC_PICTURE))
+//          Sleep(1);
       } //while (!m_bStop)
 
     }
@@ -1733,7 +1752,7 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, doubl
   // signal to clock what our framerate is, it may want to adjust it's
   // speed to better match with our video renderer's output speed
   double interval;
-  int refreshrate = m_pClock->UpdateFramerate(frametime, &interval);
+  int refreshrate = m_pClock->UpdateFramerate(m_fFrameRate, &interval);
 
 //TODO: consider whether we should always update iDuration to frametime regardless
   if(pPicture->iDuration == 0.0)
@@ -1803,6 +1822,8 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, doubl
     m_pVideoCodec->DiscardPicture();
     return EOS_DROPPED;
   }
+
+  m_pVideoCodec->SignalBufferChange();
 
   return result;
 #else
