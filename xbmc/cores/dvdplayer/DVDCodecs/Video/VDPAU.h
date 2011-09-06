@@ -74,8 +74,8 @@ public:
   virtual ~CVDPAU();
   
   virtual bool Open      (AVCodecContext* avctx, const enum PixelFormat, unsigned int surfaces = 0);
-  virtual int  Decode    (AVCodecContext* avctx, AVFrame* frame) {return Decode(avctx, frame, false);};
-  virtual int  Decode    (AVCodecContext* avctx, AVFrame* frame, bool bDrain = false);
+  virtual int  Decode    (AVCodecContext* avctx, AVFrame* frame) {return Decode(avctx, frame, false, false);};
+  virtual int  Decode    (AVCodecContext* avctx, AVFrame* frame, bool bSoftDrain = false, bool bHardDrain = false);
   virtual bool GetPicture(AVCodecContext* avctx, AVFrame* frame, DVDVideoPicture* picture);
   virtual void Reset();
   virtual void Close();
