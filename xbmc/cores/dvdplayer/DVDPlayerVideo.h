@@ -238,7 +238,6 @@ protected:
 //  double m_dropbase;
 
   bool m_stalled;
-  bool m_streamEOF;
   bool m_started;
   std::string m_codecname;
 
