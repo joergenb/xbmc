@@ -85,6 +85,7 @@ public:
   RESOLUTION GetResolution(bool next = false) const;
   void GetVideoRect(CRect &source, CRect &dest);
   float GetAspectRatio() const;
+  bool       CheckResolutionChange(float fps);
 
   virtual bool AddVideoPicture(DVDVideoPicture* picture) { return false; }
 
