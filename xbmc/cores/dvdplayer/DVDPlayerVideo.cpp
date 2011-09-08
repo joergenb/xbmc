@@ -250,6 +250,7 @@ void CDVDPlayerVideo::OpenStream(CDVDStreamInfo &hint, CDVDVideoCodec* codec)
     CLog::Log(LOGERROR, "CDVDPlayerVideo::OpenStream - Invalid framerate %d, using forced 25fps and just trust timestamps", (int)m_fFrameRate);
     m_fFrameRate = 25;
   }
+  m_pClock->UpdateFramerate(m_fFrameRate);
   lock.Leave();
 
   ResetDropInfo();
@@ -1804,6 +1805,19 @@ double CDVDPlayerVideo::GetCurrentDisplayPts()
   return g_renderManager.GetCurrentDisplayPts(playspeed);
 }
 
+double CDVDPlayerVideo::GetCorrectedPicturePts(double pts, double& frametime)
+{
+  //correct any pattern in the timestamps
+  AddPullupCorrection(pts);
+  pts += GetPullupCorrection();
+
+  //try to re-calculate the framerate
+  double framerate;
+  CalcFrameRate(framerate);
+  frametime = (double)DVD_TIME_BASE / framerate;
+  return pts;
+}
+
 int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, double delay, int playspeed)
 {
   /* picture buffer is not allowed to be modified in this call */
@@ -1819,12 +1833,12 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, doubl
   }
 
   //correct any pattern in the timestamps
-  AddPullupCorrection(pts);
-  pts += GetPullupCorrection();
+  //AddPullupCorrection(pts);
+  //pts += GetPullupCorrection();
 
   //try to calculate the framerate
-  CalcFrameRate();
-  double framerate = GetFrameRate();
+  //CalcFrameRate();
+  //double framerate = GetFrameRate();
 
   //User set delay
   pts += delay;
@@ -1833,15 +1847,15 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, doubl
   // speed to better match with our video renderer's output speed
   //double interval;
   //m_pClock->UpdateFramerate(framerate, &interval);
-  m_pClock->UpdateFramerate(framerate);
+  //m_pClock->UpdateFramerate(framerate);
 
 //TODO: consider whether we should always update iDuration to frametime regardless
-  if(pPicture->iDuration == 0.0)
-     pPicture->iDuration = (double)DVD_TIME_BASE / framerate;
+//  if(pPicture->iDuration == 0.0)
+//     pPicture->iDuration = (double)DVD_TIME_BASE / framerate;
 
 //TODO: is this right? what happpens when iDuration has been set above to output frame rate?
-  if (pPicture->iRepeatPicture)
-     pPicture->iDuration *= pPicture->iRepeatPicture + 1;
+//  if (pPicture->iRepeatPicture)
+//     pPicture->iDuration *= pPicture->iRepeatPicture + 1;
 
 
   if (pPicture->iFlags & DVP_FLAG_DROPPED)
@@ -2147,23 +2161,24 @@ void CDVDPlayerVideo::ResetFrameRateCalc()
 #define MAXFRAMERATEDIFF   0.01
 #define MAXFRAMESERR    1000
 
-void CDVDPlayerVideo::CalcFrameRate()
+bool CDVDPlayerVideo::CalcFrameRate(double& FrameRate) //return true if calculated framerate is changed
 {
   CExclusiveLock lock(m_frameRateSection);
+  FrameRate = m_fFrameRate;
 
   if (m_iFrameRateLength >= 128)
-    return; //we're done calculating
+    return false; //we're done calculating
 
   //only calculate the framerate if sync playback to display is on, adjust refreshrate is on,
   //or scaling method is set to auto
   if (!m_bCalcFrameRate && g_settings.m_currentVideoSettings.m_ScalingMethod != VS_SCALINGMETHOD_AUTO)
   {
     ResetFrameRateCalc();
-    return;
+    return false;
   }
 
   if (!m_pullupCorrection.HasFullBuffer())
-    return; //we can only calculate the frameduration if m_pullupCorrection has a full buffer
+    return false; //we can only calculate the frameduration if m_pullupCorrection has a full buffer
 
   //see if m_pullupCorrection was able to detect a pattern in the timestamps
   //and is able to calculate the correct frame duration from it
@@ -2182,11 +2197,12 @@ void CDVDPlayerVideo::CalcFrameRate()
       m_bAllowDrop = true;
       m_iFrameRateLength = 128;
     }
-    return;
+    return false;
   }
 
   double framerate = DVD_TIME_BASE / frameduration;
 
+  bool bChanged = false;
   //store the current calculated framerate if we don't have any yet
   if (m_iFrameRateCount == 0)
   {
@@ -2207,6 +2223,9 @@ void CDVDPlayerVideo::CalcFrameRate()
       {
         CLog::Log(LOGDEBUG,"%s framerate was:%f calculated:%f", __FUNCTION__, m_fFrameRate, m_fStableFrameRate / m_iFrameRateCount);
         m_fFrameRate = m_fStableFrameRate / m_iFrameRateCount;
+        FrameRate = m_fFrameRate;
+        m_pClock->UpdateFramerate(FrameRate);
+        bChanged = true;
       }
 
       //reset the stored framerates
@@ -2223,4 +2242,5 @@ void CDVDPlayerVideo::CalcFrameRate()
     m_fStableFrameRate = 0.0;
     m_iFrameRateCount = 0;
   }
+  return bChanged;
 }
