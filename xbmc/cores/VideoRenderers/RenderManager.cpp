@@ -1191,7 +1191,7 @@ void CXBMCRenderManager::CheckNextBuffer()
     m_presenttime  = presenttime;
     m_presentfield = *image.pSync;
     m_presentstep  = PRESENT_FLIP;
-    m_presentsource = -1;
+    m_presentsource = index;
     EDEINTERLACEMODE deinterlacemode = g_settings.m_currentVideoSettings.m_DeinterlaceMode;
     EINTERLACEMETHOD interlacemethod = g_settings.m_currentVideoSettings.m_InterlaceMethod;
     bool invert = false;

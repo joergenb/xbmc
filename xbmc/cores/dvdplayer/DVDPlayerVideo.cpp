@@ -913,6 +913,8 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
         }
 
         // wait if decoder buffers are full or codec does not support buffering
+        if (!bMsgSent)
+          m_pVideoCodec->SignalBufferChange(true);
         if (!m_pVideoCodec->WaitForFreeBuffer())
         {
           bFreeDecoderBuffer = false;
@@ -1917,7 +1919,7 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, doubl
     return EOS_DROPPED;
   }
 
-  m_pVideoCodec->SignalBufferChange();
+  m_pVideoCodec->SignalBufferChange(true);
 
   return result;
 #else
