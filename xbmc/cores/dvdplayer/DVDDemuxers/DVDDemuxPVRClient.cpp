@@ -87,6 +87,19 @@ bool CDVDDemuxPVRClient::Open(CDVDInputStream* pInput)
   Abort();
   m_pInput = pInput;
   RequestStreams();
+
+  m_pParser = NULL;
+  m_bHasExtraData = false;
+  if (!m_dllAvCodec.Load() || !m_dllAvFormat.Load() ||
+      !m_dllAvUtil.Load() || !m_dllAvDevice.Load())
+  {
+    CLog::Log(LOGWARNING, "%s could not load ffmpeg", __FUNCTION__);
+    m_bHasExtraData = true;
+  }
+
+  m_dllAvDevice.avdevice_register_all();
+  // register codecs
+  m_dllAvFormat.av_register_all();
   return true;
 }
 
@@ -103,6 +116,15 @@ void CDVDDemuxPVRClient::Dispose()
     m_streams[i] = NULL;
   }
   m_pInput = NULL;
+
+  if (m_pParser)
+  {
+    m_dllAvCodec.av_parser_close(m_pParser);
+  }
+  m_dllAvFormat.Unload();
+  m_dllAvCodec.Unload();
+  m_dllAvUtil.Unload();
+  m_dllAvDevice.Unload();
 }
 
 void CDVDDemuxPVRClient::Reset()
@@ -127,6 +149,115 @@ void CDVDDemuxPVRClient::Flush()
     g_PVRClients->DemuxFlush();
 }
 
+struct FFmpegProbeInput
+{
+  uint8_t *from;
+  int max;
+};
+
+int ff_read_probe_data(void *opaque, uint8_t *buf, int size)
+{
+  FFmpegProbeInput *pOp = (FFmpegProbeInput*)opaque;
+  if (size > pOp->max)
+    size = pOp->max;
+  memcpy(buf, pOp->from, size);
+  return size;
+}
+
+bool CDVDDemuxPVRClient::ParseVideoPacket(DemuxPacket* pPacket)
+{
+  bool bReturn(false);
+
+  if (pPacket && pPacket->iSize && !m_bHasExtraData)
+  {
+    CDemuxStream* st = GetStream(pPacket->iStreamId);
+    if (st && st->type == STREAM_NONE)
+    {
+      if (!m_pParser)
+      {
+        m_pParser = m_dllAvCodec.av_parser_init(st->codec);
+        if (!m_pParser)
+        {
+          CLog::Log(LOGWARNING, "%s no parser for codec: %d", __FUNCTION__, st->codec);
+        }
+      }
+      if (m_pParser && m_pParser->parser->split)
+      {
+        AVCodecContext *pCodecContext = m_dllAvCodec.avcodec_alloc_context();
+        int size = m_pParser->parser->split(pCodecContext, pPacket->pData, pPacket->iSize);
+        if (size)
+        {
+          AVCodec *codec;
+          codec = m_dllAvCodec.avcodec_find_decoder(st->codec);
+          if (!codec)
+          {
+            CLog::Log(LOGERROR, "%s - Error, can't find decoder", __FUNCTION__);
+          }
+          else
+          {
+            int maxSize = pPacket->iSize > 32768 ? 32768 : pPacket->iSize;
+            AVInputFormat *pInputFormat = m_dllAvFormat.av_find_input_format(codec->name);
+
+            if (!pInputFormat)
+            {
+              CLog::Log(LOGERROR, "%s - Error, can't find format: %s", __FUNCTION__, codec->name);
+            }
+            else
+            {
+              ByteIOContext *pIoContext;
+              FFmpegProbeInput inputData = {pPacket->pData, maxSize};
+              unsigned char* buffer = (unsigned char*)m_dllAvUtil.av_malloc(32768);
+              pIoContext = m_dllAvFormat.av_alloc_put_byte(buffer, 32768, 0,
+                                      &inputData, ff_read_probe_data, NULL, NULL);
+              pIoContext->max_packet_size = maxSize;
+
+              AVFormatContext *pFormatContext;
+              if (m_dllAvFormat.av_open_input_stream(&pFormatContext,
+                                                 pIoContext,
+                                                 "", pInputFormat, NULL) < 0)
+              {
+                CLog::Log(LOGERROR, "%s - Error, could not open input stream", __FUNCTION__);
+              }
+              else
+              {
+                int iRet = m_dllAvFormat.av_find_stream_info(pFormatContext);
+                if (iRet < 0)
+                  CLog::Log(LOGWARNING,  "%s - Error, could not get stream info", __FUNCTION__);
+                else
+                {
+                  // print some extra information
+                  m_dllAvFormat.dump_format(pFormatContext, 0, "", 0);
+                  if (pFormatContext->cur_st && pFormatContext->cur_st->codec)
+                  {
+                    if (st->ExtraData)
+                      delete[] (uint8_t*)(st->ExtraData);
+
+                    st->ExtraSize = pFormatContext->cur_st->codec->extradata_size;
+                    st->ExtraData = new uint8_t[st->ExtraSize+FF_INPUT_BUFFER_PADDING_SIZE];
+                    memcpy(st->ExtraData, pFormatContext->cur_st->codec->extradata, st->ExtraSize);
+                    memset((uint8_t*)st->ExtraData + st->ExtraSize, 0 , FF_INPUT_BUFFER_PADDING_SIZE);
+                    m_bHasExtraData = true;
+                  }
+                }
+              }
+              m_dllAvFormat.av_close_input_stream(pFormatContext);
+              if (pIoContext->buffer)
+                m_dllAvUtil.av_free(pIoContext->buffer);
+              m_dllAvUtil.av_free(pIoContext);
+            }
+          }
+          st->type = STREAM_VIDEO;
+        }
+        m_dllAvCodec.avcodec_close(pCodecContext);
+      }
+    }
+  }
+  if (m_bHasExtraData)
+    bReturn = true;
+
+  return bReturn;
+}
+
 DemuxPacket* CDVDDemuxPVRClient::Read()
 {
   DemuxPacket* pPacket = g_PVRClients->ReadDemuxStream();
@@ -142,6 +273,12 @@ DemuxPacket* CDVDDemuxPVRClient::Read()
   else if (pPacket->iStreamId == DMX_SPECIALID_STREAMCHANGE)
   {
     Reset();
+    CDVDDemuxUtils::FreeDemuxPacket(pPacket);
+    return CDVDDemuxUtils::AllocateDemuxPacket(0);
+  }
+
+  if (!ParseVideoPacket(pPacket))
+  {
     CDVDDemuxUtils::FreeDemuxPacket(pPacket);
     return CDVDDemuxUtils::AllocateDemuxPacket(0);
   }
@@ -179,6 +316,7 @@ void CDVDDemuxPVRClient::RequestStreams()
       st->iHeight         = props->stream[i].iHeight;
       st->iWidth          = props->stream[i].iWidth;
       st->fAspect         = props->stream[i].fAspect;
+      st->type            = STREAM_NONE;
       m_streams[props->stream[i].iStreamIndex] = st;
     }
     else if (props->stream[i].iCodecId == CODEC_ID_DVB_TELETEXT)
