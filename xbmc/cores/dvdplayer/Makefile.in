@@ -17,6 +17,7 @@ SRCS=	DVDAudio.cpp \
 	DVDPlayerTeletext.cpp \
 	DVDPlayerVideo.cpp \
 	DVDPlayerVideoOutput.cpp \
+	DVDPlayerVideoOutputProtocol.cpp \
 	DVDStreamInfo.cpp \
 	DVDTSCorrection.cpp \
 	Edl.cpp

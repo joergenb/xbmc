@@ -258,14 +258,13 @@ void CDVDPlayerVideo::OpenStream(CDVDStreamInfo &hint, CDVDVideoCodec* codec)
   // use aspect in stream if available
   m_fForcedAspectRatio = hint.aspect;
 
+  m_pVideoOutput->Reset();
+
   if (m_pVideoCodec)
   {
-    m_pVideoOutput->Reset();
     delete m_pVideoCodec;
-    m_pVideoOutput->Dispose();
+    m_pVideoOutput->Unconfigure();
   }
-
-  m_pVideoOutput->Reset();
 
   m_pVideoCodec = codec;
   m_pVideoOutput->SetCodec(codec);
@@ -294,10 +293,9 @@ void CDVDPlayerVideo::CloseStream(bool bWaitForBuffers)
   if (m_pVideoCodec)
   {
     m_pVideoOutput->Reset();
-    m_pVideoCodec->Dispose();
-    m_pVideoOutput->Dispose();
     delete m_pVideoCodec;
     m_pVideoCodec = NULL;
+    m_pVideoOutput->Unconfigure();
   }
 
 //TODO: sort out locking for m_pTempOverlayPicture
@@ -352,19 +350,9 @@ void CDVDPlayerVideo::Process()
     speed = GetPlaySpeed();
     if (prevSpeed != speed)
     {
-        // reset our last decoded picture clock tracking
-        m_fLastDecodedPictureClock = DVD_NOPTS_VALUE;
-        //if (speed == DVD_PLAYSPEED_PAUSE)
-        //{
-          // tell output thread the new speed 
-          ToOutputMessage toMsg;
-          toMsg.iCmd = VOCMD_SPEEDCHANGE;
-          toMsg.iSpeed = speed;
-          toMsg.bPlayerStarted = m_started;
-          //TODO: consider error handling and msg delivery timeout here too
-CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo::Process sending VOCMD_SPEEDCHANGE msg speed: %i started: %i", toMsg.iSpeed, (int)toMsg.bPlayerStarted);
-          m_pVideoOutput->SendMessage(toMsg);
-      //}
+      // reset our last decoded picture clock tracking
+      m_fLastDecodedPictureClock = DVD_NOPTS_VALUE;
+      m_pVideoOutput->SendControlMessage(ControlProtocol::SPEEDCHANGE, &speed, sizeof(speed));
     }
 
     double frametime = (double)DVD_TIME_BASE / GetFrameRate(); //need to re-evaluate as m_fFrameRate can be initially wrong
@@ -443,12 +431,11 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo::Process sending VOCMD_SPEEDCHANGE msg
       {
         // tell output to process overlays only every interval
         ToOutputMessage toMsg;
-        toMsg.iCmd = VOCMD_PROCESSOVERLAYONLY;
         toMsg.iSpeed = speed;
         toMsg.fInterval = frametime * 2;
         toMsg.bPlayerStarted = m_started;
         //TODO: consider error handling and msg delivery timeout here too
-        m_pVideoOutput->SendMessage(toMsg);
+        m_pVideoOutput->SendDataMessage(DataProtocol::PROCESSOVERLAYONLY, toMsg);
       }
 
       continue;
@@ -791,6 +778,8 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
         //      needed for GetOutputDelay() to be accurate
 
         ToOutputMessage toMsg;
+        FromOutputMessage fromMsg;
+        bool bGotMsg = false;
         bool bMsgSent = false;
         // check for a new picture
         if (iDecoderState & VC_PICTURE)
@@ -821,40 +810,26 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
              if (m_iNrOfPicturesNotToSkip > 0)
                 m_iNrOfPicturesNotToSkip--;
           }
-          // send the picture event message to output thread
-          bMsgSent = m_pVideoOutput->SendMessage(toMsg);
-          if (!bMsgSent)
+          bMsgSent = true;
+          if (!m_started)
           {
-             // try to reset output if this failed   
-             m_pVideoOutput->Reset();
-             bMsgSent = m_pVideoOutput->SendMessage(toMsg, 100);
-             if (!bMsgSent)
-             {
-               CLog::Log(LOGERROR, "CDVDPlayerVideo failed to send message to output thread");
-               //TODO: at this stage we probably need to abort as there is something very wrong with output thread
-             }
+            if (!m_pVideoOutput->SendDataMessage(DataProtocol::NEWPIC, toMsg, true, 1000, &fromMsg))
+            {
+              CLog::Log(LOGERROR, "%s - no reply from output thread", __FUNCTION__);
+            }
+            CLog::Log(LOGDEBUG,"---------- got msg");
+            bGotMsg = true;
+          }
+          else
+          {
+            // send the picture event message to output thread
+            m_pVideoOutput->SendDataMessage(DataProtocol::NEWPIC, toMsg);
           }
           SetProcessNextFrame(false); //reset
         } // VC_PICTURE
 
-        FromOutputMessage fromMsg;
-        int iMsgWait = 0; //default is not wait for any reply message
-        if (!m_started && bMsgSent) //first pic msg we wait for a reply to get reconfigured early
-        {
-           iMsgWait = 1000;
-        }
-        bool bGotMsg = m_pVideoOutput->GetMessage(fromMsg, iMsgWait);
-        if (!bGotMsg && iMsgWait && bMsgSent)
-        {
-           CLog::Log(LOGNOTICE, "ASB: CDVDPlayerVideo m_pVideoOutput->GetMessage with wait failed, resetting output");
-           m_pVideoOutput->Reset();
-           bMsgSent = m_pVideoOutput->SendMessage(toMsg, 100);
-           bGotMsg = m_pVideoOutput->GetMessage(fromMsg, 500);
-           if (!bGotMsg)
-              CLog::Log(LOGERROR, "CDVDPlayerVideo wait for output message failed");
-           //TODO: at this stage we probably need to abort if !m_started as there is something very wrong with output thread
-        }
-           
+        if (!bGotMsg)
+          bGotMsg = m_pVideoOutput->GetDataMessage(fromMsg);
         int iResult = 0;
         if (bGotMsg)
         {
@@ -875,8 +850,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
              bResChange = g_renderManager.CheckResolutionChange(m_bFpsInvalid ? 0.0 : m_output.framerate);
              if (bResChange)
              {
-                m_pVideoOutput->Reset();
-                m_pVideoOutput->Dispose();
+                m_pVideoOutput->Unconfigure();
                 m_pVideoCodec->HwFreeResources();
                 CLog::Log(LOGNOTICE,"CDVDPlayerVideo::Process - freed hw resources");
                 g_application.m_pPlayer->PauseRefreshChanging();
@@ -907,7 +881,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
              }
              else
              {
-                m_pVideoOutput->Reset(true); //tell output that we configured sucessfully and without need for complete re-init
+               m_pVideoOutput->SendControlMessage(ControlProtocol::CONFIGURED);
              }
 
            } //EOS_CONFIGURE
@@ -922,7 +896,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
               break;
            }
 
-           if(iResult & EOS_STARTED && !m_started)
+           if(!m_started)
            {
               m_codecname = m_pVideoCodec->GetName();
               m_started = true;
@@ -957,10 +931,8 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
              CLog::Log(LOGNOTICE, "ASB: CDVDPlayerVideo VC_HINT_HARDDRAIN");
              iDecoderHint |= VC_HINT_HARDDRAIN;
              // send an expect delay message to output thread
-             ToOutputMessage toMsg;
-             toMsg.iCmd = VOCMD_EXPECTDELAY;
-             toMsg.fInterval = DVD_MSEC_TO_TIME(200);
-             m_pVideoOutput->SendMessage(toMsg);
+             double delay = DVD_MSEC_TO_TIME(200);
+             m_pVideoOutput->SendControlMessage(ControlProtocol::EXPECTDELAY, &delay, sizeof(delay));
           }
           m_pVideoCodec->SetDropState(bRequestDrop);
           m_pVideoCodec->SetDecoderHint(iDecoderHint);
@@ -970,15 +942,14 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
  
         if (bStreamEOF) //EOF and timed out so drain render manager buffers
         {
-           // wait for output to confirm it has posted all pics to render manager
-           ToOutputMessage toMsg;
-           toMsg.iCmd = VOCMD_FINISHSTREAM;
-           if (m_pVideoOutput->SendMessage(toMsg, 1))
+          // wait for output to confirm it has posted all pics to render manager
+          ToOutputMessage msg;
+           if (m_pVideoOutput->SendDataMessage(DataProtocol::FINISH, msg))
            {
               // wait for receipt message
               FromOutputMessage fromMsg;
               int iResult;
-              bGotMsg = m_pVideoOutput->GetMessage(fromMsg, 200);
+              bGotMsg = m_pVideoOutput->GetDataMessage(fromMsg, 200);
               while (bGotMsg)
               {
                  iResult = fromMsg.iResult;
@@ -989,7 +960,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
                  }
                  if (iResult & EOS_QUIESCED)
                     break;
-                 bGotMsg = m_pVideoOutput->GetMessage(fromMsg);
+                 bGotMsg = m_pVideoOutput->GetDataMessage(fromMsg);
               }
               if (!(iResult & EOS_QUIESCED))
                  CLog::Log(LOGWARNING, "CDVDPlayerVideo - Did not recieve QUIESCED message from output thread");
