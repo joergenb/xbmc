@@ -55,7 +55,6 @@ CVDPAU::Desc decoder_profiles[] = {
 };
 const size_t decoder_profile_count = sizeof(decoder_profiles)/sizeof(CVDPAU::Desc);
 
-//// TODO: This matrix is for BT709 only and is probably slighly out - derive from first principles instead
 //static float studioCSC[3][4] =
 //{
 //    { 1.0f,        0.0f, 1.57480000f,-0.78740000f},
@@ -189,7 +188,6 @@ CVDPAU::CVDPAU() : CThread("CVDPAU")
     m_allOutPic[i].vdp_flip_queue = VDP_INVALID_HANDLE;
   }
 
-  // TODO: change setting to integer level setting all scaling options below it too 
   upScale = g_advancedSettings.m_videoVDPAUScaling;
 }
 
@@ -344,7 +342,7 @@ void CVDPAU::SetWidthHeight(int width, int height)
 
   //pick the smallest dimensions, so we downscale with vdpau and upscale with opengl when appropriate
   //this requires the least amount of gpu memory bandwidth
-  if (g_graphicsContext.GetWidth() < width || g_graphicsContext.GetHeight() < height || upScale)
+  if (g_graphicsContext.GetWidth() < width || g_graphicsContext.GetHeight() < height || upScale >= 0)
   {
     //scale width to desktop size if the aspect ratio is the same or bigger than the desktop
     if ((double)height * g_graphicsContext.GetWidth() / width <= (double)g_graphicsContext.GetHeight())
@@ -363,6 +361,7 @@ void CVDPAU::SetWidthHeight(int width, int height)
     OutWidth = width;
     OutHeight = height;
   }
+  CLog::Log(LOGDEBUG, "CVDPAU::SetWidthHeight Setting OutWidth: %i OutHeight: %i vdpauMaxHeight: %i", OutWidth, OutHeight, vdpauMaxHeight);
 }
 
 bool CVDPAU::MakePixmap(int index, int width, int height)
@@ -584,8 +583,9 @@ void CVDPAU::CheckFeatures()
       tmpContrast = 0;
       tmpNoiseReduction = 0;
       tmpSharpness = 0;
-      tmpPostProc = true;
       tmpDeint = 0;
+      tmpUpScale = -1;
+      tmpPostProc = true;
 
       VdpStatus vdp_st = VDP_STATUS_ERROR;
       vdp_st = vdp_video_mixer_create(vdp_device,
@@ -596,10 +596,13 @@ void CVDPAU::CheckFeatures()
                                     parameter_values,
                                     &videoMixer);
       CheckStatus(vdp_st, __LINE__);
-
-      //SetHWUpscaling();
     }
 
+    if (tmpUpScale != upScale)
+    {
+      SetHWUpscaling();
+      tmpUpScale = upScale;
+    }
     if (tmpBrightness != g_settings.m_currentVideoSettings.m_Brightness ||
       tmpContrast   != g_settings.m_currentVideoSettings.m_Contrast)
     {
@@ -841,13 +844,79 @@ void CVDPAU::SetDeintSkipChroma()
 void CVDPAU::SetHWUpscaling()
 {
 #ifdef VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1
-  if(!Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1) || !upScale)
-    return;
+  //if(!Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1) || upScale <= 0)
+    //return;
 
-  VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1 };
   VdpStatus vdp_st;
   VdpBool enabled[]={1};
-  vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+  switch (upScale)
+  {
+    case 9:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L9))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L9 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    case 8:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L8))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L8 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    case 7:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L7))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L7 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    case 6:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L6))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L6 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    case 5:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L5))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L5 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    case 4:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L4))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L4 };
+          break;
+       }
+    case 3:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L3))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L3 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    case 2:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L2))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L2 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    case 1:
+       if (Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1))
+       {
+          VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1 };
+          vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+          break;
+       }
+    default:
+       DisableHQScaling();
+       return;
+  }
   CheckStatus(vdp_st, __LINE__);
 #endif
 }
@@ -935,38 +1004,12 @@ void CVDPAU::SetDeinterlacing()
   SetDeintSkipChroma();
 }
 
-void CVDPAU::PostProcOff()
+void CVDPAU::DisableHQScaling()
 {
   VdpStatus vdp_st;
 
   if (videoMixer == VDP_INVALID_HANDLE)
     return;
-
-  VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL,
-                                     VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL_SPATIAL,
-                                     VDP_VIDEO_MIXER_FEATURE_INVERSE_TELECINE};
-
-  VdpBool enabled[]={0,0,0};
-  vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
-  CheckStatus(vdp_st, __LINE__);
-
-  if(Supports(VDP_VIDEO_MIXER_FEATURE_NOISE_REDUCTION))
-  {
-    VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_NOISE_REDUCTION};
-
-    VdpBool enabled[]={0};
-    vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
-    CheckStatus(vdp_st, __LINE__);
-  }
-
-  if(Supports(VDP_VIDEO_MIXER_FEATURE_SHARPNESS))
-  {
-    VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_SHARPNESS};
-
-    VdpBool enabled[]={0};
-    vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
-    CheckStatus(vdp_st, __LINE__);
-  }
 
   if(Supports(VDP_VIDEO_MIXER_FEATURE_HIGH_QUALITY_SCALING_L1))
   {
@@ -1039,6 +1082,42 @@ void CVDPAU::PostProcOff()
     vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
     CheckStatus(vdp_st, __LINE__);
   }
+}
+
+void CVDPAU::PostProcOff()
+{
+  VdpStatus vdp_st;
+
+  if (videoMixer == VDP_INVALID_HANDLE)
+    return;
+
+  VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL,
+                                     VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL_SPATIAL,
+                                     VDP_VIDEO_MIXER_FEATURE_INVERSE_TELECINE};
+
+  VdpBool enabled[]={0,0,0};
+  vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+  CheckStatus(vdp_st, __LINE__);
+
+  if(Supports(VDP_VIDEO_MIXER_FEATURE_NOISE_REDUCTION))
+  {
+    VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_NOISE_REDUCTION};
+
+    VdpBool enabled[]={0};
+    vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+    CheckStatus(vdp_st, __LINE__);
+  }
+
+  if(Supports(VDP_VIDEO_MIXER_FEATURE_SHARPNESS))
+  {
+    VdpVideoMixerFeature feature[] = { VDP_VIDEO_MIXER_FEATURE_SHARPNESS};
+
+    VdpBool enabled[]={0};
+    vdp_st = vdp_video_mixer_set_feature_enables(videoMixer, ARSIZE(feature), feature, enabled);
+    CheckStatus(vdp_st, __LINE__);
+  }
+
+  DisableHQScaling();
 }
 
 
@@ -2026,7 +2105,6 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
         continue;
       else if (bHardDrain)
       {
-        // TODO: improve mixer drain logic so that it occurs if usedPics+msgs==0 for say 50ms and asked to drain throughout
         if (usedPics == 0 && msgs == 0 && prevNotEmpty && iter > 100)
         {
           CSingleLock lock(m_mixerSec);
