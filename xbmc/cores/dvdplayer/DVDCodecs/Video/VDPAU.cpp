@@ -1477,7 +1477,10 @@ bool CVDPAU::FiniOutputMethod()
   totalAvailableOutputSurfaces = 0;
 
   if (m_threeBlackLines)
+  {
     delete [] m_threeBlackLines;
+    m_threeBlackLines = NULL;
+  }
 
   if (videoMixer != VDP_INVALID_HANDLE)
   {
