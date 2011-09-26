@@ -124,6 +124,7 @@ public:
   virtual unsigned GetReadRate() { return 0; }
 
   bool IsStreamType(DVDStreamType type) const { return m_streamType == type; }
+  bool IsRealtime() { return m_bIsRealtime; }
   virtual bool IsEOF() = 0;
   virtual int GetCurrentGroupId() { return 0; }
   virtual BitstreamStats GetBitstreamStats() const { return m_stats; }
@@ -136,4 +137,5 @@ protected:
   BitstreamStats m_stats;
   std::string m_content;
   CFileItem m_item;
+  bool m_bIsRealtime;
 };

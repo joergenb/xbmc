@@ -46,4 +46,9 @@ void CDVDInputStream::Close()
 void CDVDInputStream::SetFileItem(const CFileItem& item)
 {
   m_item = item;
+  std::string file = item.GetPath();
+  if (file.substr(0, 6) == "pvr://")
+    m_bIsRealtime = true;
+  else
+    m_bIsRealtime = false;
 }

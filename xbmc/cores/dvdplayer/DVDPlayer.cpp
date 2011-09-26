@@ -998,8 +998,8 @@ void CDVDPlayer::Process()
   }
 
   // make sure all selected stream have data on startup
-  if (CachePVRStream())
-    SetCaching(CACHESTATE_PVR);
+  if (CacheRealtimeStream())
+    SetCaching(CACHESTATE_RT);
 
   // make sure application know our info
   UpdateApplication(0);
@@ -1011,7 +1011,7 @@ void CDVDPlayer::Process()
   // we are done initializing now, set the readyevent
   m_ready.Set();
 
-  if (!CachePVRStream())
+  if (!CacheRealtimeStream())
     SetCaching(CACHESTATE_FLUSH);
 
   while (!m_bAbortRequest)
@@ -1047,8 +1047,8 @@ void CDVDPlayer::Process()
         break;
       }
 
-      if (CachePVRStream())
-        SetCaching(CACHESTATE_PVR);
+      if (CacheRealtimeStream())
+        SetCaching(CACHESTATE_RT);
 
       OpenDefaultStreams();
       UpdateApplication(0);
@@ -1140,9 +1140,8 @@ void CDVDPlayer::Process()
         Sleep(100);
         continue;
       }
-      else if (m_pInputStream->IsStreamType(DVDSTREAM_TYPE_PVRMANAGER))
+      else if (m_pInputStream->IsRealtime())
       {
-        CDVDInputStreamPVRManager* pStream = static_cast<CDVDInputStreamPVRManager*>(m_pInputStream);
         unsigned int iTimeout = (unsigned int) g_guiSettings.GetInt("pvrplayback.scantime");
         if (m_scanStart && XbmcThreads::SystemClockMillis() - m_scanStart >= iTimeout*1000)
         {
@@ -1151,7 +1150,7 @@ void CDVDPlayer::Process()
           break;
         }
 
-        if (pStream->IsEOF())
+        if (m_pInputStream->IsEOF())
           break;
 
         Sleep(100);
@@ -1489,7 +1488,7 @@ void CDVDPlayer::HandlePlaySpeed()
     }
   }
 
-  if (caching == CACHESTATE_PVR)
+  if (caching == CACHESTATE_RT)
   {
     bool bGotAudio(m_pDemuxer->GetNrOfAudioStreams() > 0);
     bool bGotVideo(m_pDemuxer->GetNrOfVideoStreams() > 0);
@@ -1588,13 +1587,13 @@ bool CDVDPlayer::CheckStartCaching(CCurrentStream& current)
   if((current.type == STREAM_AUDIO && m_dvdPlayerAudio.IsStalled())
   || (current.type == STREAM_VIDEO && m_dvdPlayerVideo.IsStalled()))
   {
-    if (CachePVRStream())
+    if (CacheRealtimeStream())
     {
       if ((current.type == STREAM_AUDIO && current.started && m_dvdPlayerAudio.m_messageQueue.GetLevel() == 0) ||
          (current.type == STREAM_VIDEO && current.started && m_dvdPlayerVideo.m_messageQueue.GetLevel() == 0))
       {
         CLog::Log(LOGDEBUG, "%s stream stalled. start buffering", current.type == STREAM_AUDIO ? "audio" : "video");
-        SetCaching(CACHESTATE_PVR);
+        SetCaching(CACHESTATE_RT);
       }
       return true;
     }
@@ -2340,7 +2339,7 @@ void CDVDPlayer::SetCaching(ECacheState state)
   CLog::Log(LOGDEBUG, "CDVDPlayer::SetCaching - caching state %d", state);
   if(state == CACHESTATE_FULL
   || state == CACHESTATE_INIT
-  || state == CACHESTATE_PVR)
+  || state == CACHESTATE_RT)
   {
     m_clock.SetSpeed(DVD_PLAYSPEED_PAUSE);
     m_dvdPlayerAudio.SetSpeed(DVD_PLAYSPEED_PAUSE);
@@ -2348,7 +2347,7 @@ void CDVDPlayer::SetCaching(ECacheState state)
     m_dvdPlayerVideo.SetSpeed(DVD_PLAYSPEED_PAUSE);
     m_dvdPlayerVideo.SendMessage(new CDVDMsg(CDVDMsg::PLAYER_STARTED), 1);
 
-    if (state == CACHESTATE_PVR)
+    if (state == CACHESTATE_RT)
       m_scanStart = XbmcThreads::SystemClockMillis();
   }
 
@@ -2373,7 +2372,7 @@ void CDVDPlayer::SetPlaySpeed(int speed)
 
 void CDVDPlayer::Pause()
 {
-  if(m_playSpeed != DVD_PLAYSPEED_PAUSE && (m_caching == CACHESTATE_FULL || m_caching == CACHESTATE_PVR))
+  if(m_playSpeed != DVD_PLAYSPEED_PAUSE && (m_caching == CACHESTATE_FULL || m_caching == CACHESTATE_RT))
   {
     SetCaching(CACHESTATE_DONE);
     return;
@@ -2394,7 +2393,7 @@ void CDVDPlayer::Pause()
 
 bool CDVDPlayer::IsPaused() const
 {
-  return m_playSpeed == DVD_PLAYSPEED_PAUSE || m_caching == CACHESTATE_FULL || m_caching == CACHESTATE_PVR;
+  return m_playSpeed == DVD_PLAYSPEED_PAUSE || m_caching == CACHESTATE_FULL || m_caching == CACHESTATE_RT;
 }
 
 bool CDVDPlayer::HasVideo() const
@@ -4045,9 +4044,9 @@ bool CDVDPlayer::SwitchChannel(const CPVRChannel &channel)
   return true;
 }
 
-bool CDVDPlayer::CachePVRStream(void) const
+bool CDVDPlayer::CacheRealtimeStream(void) const
 {
-  return m_pInputStream->IsStreamType(DVDSTREAM_TYPE_PVRMANAGER) &&
+  return m_pInputStream->IsRealtime() &&
       !g_PVRManager.IsPlayingRecording() &&
       g_advancedSettings.m_bPVRCacheInDvdPlayer;
 }
