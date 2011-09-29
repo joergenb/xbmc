@@ -26,6 +26,7 @@ LIBS=
 ifneq (@USE_EXTERNAL_FFMPEG@,1)
   LIBS+=avutil-50-$(ARCH).so \
 	avcodec-52-$(ARCH).so \
+	avdevice-52-$(ARCH).so \
 	avcore-0-$(ARCH).so \
 	avformat-52-$(ARCH).so \
 	postproc-51-$(ARCH).so \
@@ -63,6 +64,11 @@ $(SYSDIR)/avcodec-52-$(ARCH).so: $(WRAPPER) ffmpeg/libavcodec/libavcodec.dylib
 	$(LD) $(LDFLAGS) -alias_list $(WRAPPER_MACH_ALIAS) -o $@ \
 		$(WRAPPER) ffmpeg/libavcodec/*.o \
 		ffmpeg/libavcodec/$(ARCH_DIR)/*.o $(BUNDLE1_O)
+
+$(SYSDIR)/avdevice-52-$(ARCH).so: $(WRAPPER) ffmpeg/libavdevice/libavdevice.dylib
+	$(LD) $(LDFLAGS) -alias_list $(WRAPPER_MACH_ALIAS) -o $@ \
+		$(WRAPPER) ffmpeg/libavdevice/*.o \
+		ffmpeg/libavdevice/$(ARCH_DIR)/*.o $(BUNDLE1_O)
 
 $(SYSDIR)/avcore-0-$(ARCH).so: $(WRAPPER) ffmpeg/libavcore/libavcore.dylib
 	$(LD) $(LDFLAGS) -alias_list $(WRAPPER_MACH_ALIAS)  -o $@ \
@@ -115,6 +121,9 @@ $(SYSDIR)/avutil-50-$(ARCH).so: ffmpeg/libavutil/libavutil.so
 
 $(SYSDIR)/avcodec-52-$(ARCH).so: $(WRAPPER) ffmpeg/libavcodec/libavcodec.so
 	cp ffmpeg/libavcodec/libavcodec.so $@
+
+$(SYSDIR)/avdevice-52-$(ARCH).so: $(WRAPPER) ffmpeg/libavdevice/libavdevice.so
+	cp ffmpeg/libavdevice/libavdevice.so $@
 
 $(SYSDIR)/avcore-0-$(ARCH).so: $(WRAPPER) ffmpeg/libavcore/libavcore.so
 	cp ffmpeg/libavcore/libavcore.so $@

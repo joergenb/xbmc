@@ -52,6 +52,7 @@ OPTIONS="
 make $MAKEFLAGS &&
 cp lib*/*.dll .libs/ &&
 cp .libs/avcodec-52.dll /xbmc/system/players/dvdplayer/ &&
+cp .libs/avdevice-52.dll /xbmc/system/players/dvdplayer/ &&
 cp .libs/avcore-0.dll /xbmc/system/players/dvdplayer/ &&
 cp .libs/avformat-52.dll /xbmc/system/players/dvdplayer/ &&
 cp .libs/avutil-50.dll /xbmc/system/players/dvdplayer/ &&
