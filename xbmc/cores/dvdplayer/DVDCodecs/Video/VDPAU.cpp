@@ -873,8 +873,8 @@ bool CVDPAU::ConfigVDPAU(AVCodecContext* avctx, int ref_frames)
 
   VdpStatus vdp_st;
   VdpDecoderProfile vdp_decoder_profile;
-  vid_width = avctx->width;
-  vid_height = avctx->height;
+  vid_width = avctx->coded_width;
+  vid_height = avctx->coded_height;
 
   past[1] = past[0] = current = future = NULL;
   CLog::Log(LOGNOTICE, " (VDPAU) screenWidth:%i vidWidth:%i",OutWidth,vid_width);
@@ -1022,8 +1022,8 @@ int CVDPAU::FFGetBuffer(AVCodecContext *avctx, AVFrame *pic)
     render = (vdpau_render_state*)calloc(sizeof(vdpau_render_state), 1);
     vdp_st = vdp->vdp_video_surface_create(vdp->vdp_device,
                                            vdp->vdp_chroma_type,
-                                           avctx->width,
-                                           avctx->height,
+                                           avctx->coded_width,
+                                           avctx->coded_height,
                                            &render->surface);
     vdp->CheckStatus(vdp_st, __LINE__);
     if (vdp_st != VDP_STATUS_OK)
