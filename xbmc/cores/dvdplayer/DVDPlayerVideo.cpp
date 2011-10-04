@@ -149,7 +149,6 @@ CDVDPlayerVideo::CDVDPlayerVideo( CDVDClock* pClock
   g_dvdPerformanceCounter.EnableVideoQueue(&m_messageQueue);
 
   m_iCurrentPts = DVD_NOPTS_VALUE;
-  m_fLastDecodedPictureClock = DVD_NOPTS_VALUE;
   m_iDroppedFrames = 0;
   m_iDecoderDroppedFrames = 0;
   m_iDecoderPresentDroppedFrames = 0;
@@ -293,6 +292,7 @@ void CDVDPlayerVideo::CloseStream(bool bWaitForBuffers)
   if (m_pVideoCodec)
   {
     m_pVideoOutput->Reset();
+    m_pVideoCodec->Dispose();
     delete m_pVideoCodec;
     m_pVideoCodec = NULL;
     m_pVideoOutput->Unconfigure();
@@ -317,7 +317,6 @@ void CDVDPlayerVideo::OnStartup()
   m_iDecoderPresentDroppedFrames = 0;
   m_iOutputDroppedFrames = 0;
   m_iPlayerDropRequests = 0;
-  m_fLastDecodedPictureClock = DVD_NOPTS_VALUE;
 
   m_crop.x1 = m_crop.x2 = 0.0f;
   m_crop.y1 = m_crop.y2 = 0.0f;
@@ -339,6 +338,12 @@ void CDVDPlayerVideo::Process()
   bool bFreeDecoderBuffer = true;
   bool bStreamEOF = false;
   int speed = GetPlaySpeed();
+  double fStartedClock = DVD_NOPTS_VALUE;
+  double fLastPlayerResync = CDVDClock::GetAbsoluteClock(true);
+  double fLastDecodedPictureClock = fLastPlayerResync;
+  double fPrevLastDecodedPictureClock = fLastPlayerResync;
+  double fLastDemuxPacketClock = fLastPlayerResync;
+  bool bMustProcessNextFrame = false;
   SetProcessNextFrame(false);
 
   m_videoStats.Start();
@@ -350,15 +355,14 @@ void CDVDPlayerVideo::Process()
     speed = GetPlaySpeed();
     if (prevSpeed != speed)
     {
-      // reset our last decoded picture clock tracking
-      m_fLastDecodedPictureClock = DVD_NOPTS_VALUE;
+      // reset our last decode time as if we had just decoded
+      fLastDecodedPictureClock = CDVDClock::GetAbsoluteClock(true);
+      fPrevLastDecodedPictureClock = fLastDecodedPictureClock;
       m_pVideoOutput->SendControlMessage(ControlProtocol::SPEEDCHANGE, &speed, sizeof(speed));
     }
 
     double frametime = (double)DVD_TIME_BASE / GetFrameRate(); //need to re-evaluate as m_fFrameRate can be initially wrong
-    // the timeout for not stalled should be better as 1ms once started 
-    // - and only consider as stalled if we don't get a packet for say 5 frametimes after last decode
-    // when no packet just go to decode section again with a fake a "decode again" msg
+    // the timeout for not stalled should be better as say 3ms once started 
     //int iQueueTimeOut = (int)(m_stalled ? frametime / 4 : frametime * 10) / 1000;
     int iQueueTimeOut; // msg get timeout in ms
     if (!m_started)
@@ -366,19 +370,21 @@ void CDVDPlayerVideo::Process()
     else if (m_stalled)
        iQueueTimeOut = frametime / 1000;
     else
-       iQueueTimeOut = 1;
+       iQueueTimeOut = 3;
 
-    bool mustProcessNextPacket = false;
     if (GetProcessNextFrame())
-       mustProcessNextPacket = true;
+       bMustProcessNextFrame = true;
+    else
+       bMustProcessNextFrame = false;
 
-    int iPriority = (speed == DVD_PLAYSPEED_PAUSE && m_started && !mustProcessNextPacket) ? 1 : 0;
+    //don't get demux packet msgs if paused and started (unless requested to step frame)
+    int iPriority = (speed == DVD_PLAYSPEED_PAUSE && m_started && !bMustProcessNextFrame) ? 1 : 0;
     if (GetRefreshChanging())
       iPriority = 20;
     else if (!bFreeDecoderBuffer)
     {
-      iPriority = 1;
-      iQueueTimeOut = 1;
+      iPriority = 1; //don't get demux packet msgs while decoder is not accepting data (no matter what)
+      iQueueTimeOut = 1; //we only want to check quickly for control msg and get back to the decoder
     }
 
     CDVDMsg* pMsg;
@@ -386,60 +392,72 @@ void CDVDPlayerVideo::Process()
 
     ret = m_messageQueue.Get(&pMsg, iQueueTimeOut, iPriority);
 
-    // prevent from processing when waiting for change of refresh rate
-    if (GetRefreshChanging() && ret == MSGQ_TIMEOUT)
-      continue;
-
-    if (ret == MSGQ_TIMEOUT)
-    {
-      if ((!bFreeDecoderBuffer) ||
-          (m_fLastDecodedPictureClock != DVD_NOPTS_VALUE &&
-           CDVDClock::GetAbsoluteClock(true) - m_fLastDecodedPictureClock < frametime * 5) ||
-           bStreamEOF)
-      {
-        pMsg = new CDVDMsg(CDVDMsg::GENERAL_NO_CMD);
-        ret = MSGQ_OK;
-      }
-    }
-    bFreeDecoderBuffer = true;
-
     if (MSGQ_IS_ERROR(ret) || ret == MSGQ_ABORT)
     {
       CLog::Log(LOGERROR, "Got MSGQ_ABORT or MSGO_IS_ERROR return true");
       break;
     }
-    else if (ret == MSGQ_TIMEOUT)
-    {
-      // if we only wanted priority messages, this isn't a stall
-      if( iPriority )
-        continue;
 
-      //Okey, start rendering at stream fps now instead, we are likely in a stillframe
-      if( !m_stalled )
-      {
-        if(m_started)
-          CLog::Log(LOGINFO, "CDVDPlayerVideo - Stillframe detected, switching to forced %f fps", GetFrameRate());
-        m_stalled = true;
-        //pts+= frametime*4;
-        // drive pts for overlays (still frames)
-        //m_pVideoOutput->SetPts(m_pVideoOutput->GetPts() + frametime*4);
-      }
-      //else //TODO: should this pts increment match iQueueTimeOut?
-      //  m_pVideoOutput->SetPts(m_pVideoOutput->GetPts() + frametime);
-
-      if (m_started && m_stalled) //for clarity
-      {
-        // tell output to process overlays only every interval
-        ToOutputMessage toMsg;
-        toMsg.iSpeed = speed;
-        toMsg.fInterval = frametime * 2;
-        toMsg.bPlayerStarted = m_started;
-        //TODO: consider error handling and msg delivery timeout here too
-        m_pVideoOutput->SendDataMessage(DataProtocol::PROCESSOVERLAYONLY, toMsg);
-      }
-
+    // prevent from processing further if get timed out when waiting for change of refresh rate, or any other priority wait 
+    // except in the latter case when we happen to be waiting for the decoder to free up a buffer or for player to get started
+    if (ret == MSGQ_TIMEOUT && (iPriority >=20 || (iPriority > 0 && bFreeDecoderBuffer && m_started)))
       continue;
+
+    double clock = CDVDClock::GetAbsoluteClock(true);
+
+    // in other cases if we timeout we may still want to process a picture from decoder buffers 
+    // - at end of stream
+    // - to allow buffer draining when there is a stutter in the input demux stream 
+    //   (for up to 5 frametimes elapsed since last decode - after which we should consider as stalled and soft drain decoder)
+    // - if we have no free space in decoder buffer
+    // but only when not paused (that is unless requested to step frame)
+    if (ret == MSGQ_TIMEOUT)
+    {
+      if ( (speed != DVD_PLAYSPEED_PAUSE || bMustProcessNextFrame) &&
+           ((!bFreeDecoderBuffer) || bStreamEOF || (clock - fLastDecodedPictureClock < frametime * 5)) )
+      {
+        pMsg = new CDVDMsg(CDVDMsg::GENERAL_NO_CMD); //pseudo msg to get into decode section
+        ret = MSGQ_OK;
+      }
+      else if (iPriority > 0) 
+      {
+        // if we only wanted priority messages, this isn't a stall
+        continue;
+      }
+      else if (clock - fLastPlayerResync < DVD_MSEC_TO_TIME(1000))
+      {
+        // if we were asked to resync to by player recently (1sec) don't move to stall or overlay only mode
+        // but send an expect delay message to output
+        double delay = DVD_MSEC_TO_TIME(300);
+        m_pVideoOutput->SendControlMessage(ControlProtocol::EXPECTDELAY, &delay, sizeof(delay));
+        continue;
+      }
+      else
+      {
+        //Okey, start rendering at stream fps now instead, we are likely in a stillframe
+        // So we timed out unexpectedly and should now move to stalled state
+        if( !m_stalled )
+        {
+          if(m_started)
+            CLog::Log(LOGINFO, "CDVDPlayerVideo - Stillframe detected, switching to forced %f fps", GetFrameRate());
+          m_stalled = true;
+        }
+
+        if (m_started && m_stalled) //for clarity
+        {
+CLog::Log(LOGDEBUG, "CDVDPlayerVideo move to overlay only mode");
+          // tell output to process overlays only every interval
+          ToOutputMessage toMsg;
+          toMsg.iSpeed = speed;
+          toMsg.fInterval = frametime;
+          toMsg.bPlayerStarted = m_started;
+          m_pVideoOutput->SendDataMessage(DataProtocol::PROCESSOVERLAYONLY, toMsg);
+        }
+        continue;
+      }
     }
+    
+    // from here-on we should have a message to process
 
     if (pMsg->IsType(CDVDMsg::GENERAL_SYNCHRONIZE))
     {
@@ -447,6 +465,7 @@ void CDVDPlayerVideo::Process()
       CLog::Log(LOGDEBUG, "CDVDPlayerVideo - CDVDMsg::GENERAL_SYNCHRONIZE");
       pMsg->Release();
 
+//TODO: should we also consider this as as resync from player so don't go to stalled so quickly?
       /* we may be very much off correct pts here, but next picture may be a still*/
       /* make sure it isn't dropped */
       m_iNrOfPicturesNotToSkip = 5;
@@ -456,24 +475,16 @@ void CDVDPlayerVideo::Process()
     {
       CDVDMsgGeneralResync* pMsgGeneralResync = (CDVDMsgGeneralResync*)pMsg;
 
-      if(pMsgGeneralResync->m_timestamp != DVD_NOPTS_VALUE)
-      {
-        pts = pMsgGeneralResync->m_timestamp;
-        //m_pVideoOutput->SetPts(pMsgGeneralResync->m_timestamp);
-      }
-
-//      double delay = m_FlipTimeStamp - m_pClock->GetAbsoluteClock();
-//      if( delay > frametime ) delay = frametime;
-//      else if( delay < 0 )    delay = 0;
-
       if(pMsgGeneralResync->m_clock)
       {
-        CLog::Log(LOGDEBUG, "CDVDPlayerVideo - CDVDMsg::GENERAL_RESYNC(%f, 1)", pts);
-//        m_pClock->Discontinuity(m_pVideoOutput->GetPts() - delay);
-        m_pClock->Discontinuity(pts);
+        CLog::Log(LOGDEBUG, "CDVDPlayerVideo - CDVDMsg::GENERAL_RESYNC(%f, 1)", pMsgGeneralResync->m_timestamp);
+        if (pMsgGeneralResync->m_timestamp != DVD_NOPTS_VALUE)
+           m_pClock->Discontinuity(pMsgGeneralResync->m_timestamp);
       }
       else
-        CLog::Log(LOGDEBUG, "CDVDPlayerVideo - CDVDMsg::GENERAL_RESYNC(%f, 0)", pts);
+        CLog::Log(LOGDEBUG, "CDVDPlayerVideo - CDVDMsg::GENERAL_RESYNC(%f, 0)", pMsgGeneralResync->m_timestamp);
+      //record the time so that we don't move to stalled so quickly after a resync
+      fLastPlayerResync = clock;
 
       pMsgGeneralResync->Release();
       continue;
@@ -487,9 +498,9 @@ void CDVDPlayerVideo::Process()
         CLog::Log(LOGDEBUG, "CDVDPlayerVideo - CDVDMsg::GENERAL_DELAY(%f)", timeout);
 
         timeout *= (double)DVD_PLAYSPEED_NORMAL / abs(speed);
-        timeout += CDVDClock::GetAbsoluteClock();
+        timeout += clock;
 
-        while(!m_bStop && CDVDClock::GetAbsoluteClock() < timeout)
+        while(!m_bStop && CDVDClock::GetAbsoluteClock(true) < timeout)
           Sleep(1);
       }
     }
@@ -553,15 +564,17 @@ void CDVDPlayerVideo::Process()
     else if (pMsg->IsType(CDVDMsg::PLAYER_STARTED))
     {
       if(m_started)
+{
         m_messageParent.Put(new CDVDMsgInt(CDVDMsg::PLAYER_STARTED, DVDPLAYER_VIDEO));
+CLog::Log(LOGDEBUG, "ASB: DVDPlayerVideo::Sent CDVDMsg::PLAYER_STARTED, DVDPLAYER_VIDEO");
+}
     }
     else if (pMsg->IsType(CDVDMsg::GENERAL_STREAMCHANGE))
     {
       CDVDMsgVideoCodecChange* msg(static_cast<CDVDMsgVideoCodecChange*>(pMsg));
       OpenStream(msg->m_hints, msg->m_codec);
       msg->m_codec = NULL;
-//TODO: do we need to send a de-alloc pic message to output thread?
-//      picture.iFlags &= ~DVP_FLAG_ALLOCATED;
+      m_pVideoOutput->SendControlMessage(ControlProtocol::DEALLOCPIC);
     }
 
     if (pMsg->IsType(CDVDMsg::GENERAL_EOF))
@@ -577,7 +590,7 @@ CLog::Log(LOGDEBUG, "ASB: DVDPlayerVideo::Process bStreamEOF message");
       bRequestDrop = false; //reset
       DemuxPacket* pPacket;
       bool bPacketDrop;
-      int iDecoderState = 0;
+      int iDecoderState = -1;
       int iDropDirective = 0;
       int iDecoderHint = 0;
 
@@ -597,18 +610,20 @@ CLog::Log(LOGDEBUG, "ASB: DVDPlayerVideo::Process bStreamEOF message");
       {
         if (bStreamEOF)
 {
-CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo VC_HINT_HARDDRAIN");
+CLog::Log(LOGDEBUG, "CDVDPlayerVideo VC_HINT_HARDDRAIN");
            iDecoderHint |= VC_HINT_HARDDRAIN;
 }
         m_pVideoCodec->SetDropState(bRequestDrop);
         m_pVideoCodec->SetDecoderHint(iDecoderHint);
+//CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo No PACKET Decode bStreamEOF: %i", (int)bStreamEOF);
         iDecoderState = m_pVideoCodec->Decode(NULL, 0, DVD_NOPTS_VALUE, DVD_NOPTS_VALUE);
       }
       else
       {
         bStreamEOF = false;
         pPacket = ((CDVDMsgDemuxerPacket*)pMsg)->GetPacket();
-        bPacketDrop     = ((CDVDMsgDemuxerPacket*)pMsg)->GetPacketDrop();
+        bPacketDrop = ((CDVDMsgDemuxerPacket*)pMsg)->GetPacketDrop();
+        fLastDemuxPacketClock = clock; //record time we got this packet
 
         if (m_stalled)
         {
@@ -671,7 +686,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo VC_HINT_HARDDRAIN");
         // - as that happens after a flush and then defeats the object of having the buffer
         int iConvergeCount = m_pVideoCodec->GetConvergeCount();
 
-CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::Process about to decode pts: %f drop: %i", pPacket->pts, (int)bRequestDrop);
+//CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::Process about to decode pts: %f drop: %i iDecoderHint: %i", pPacket->pts, (int)bRequestDrop, iDecoderHint);
         iDecoderState = m_pVideoCodec->Decode(pPacket->pData, pPacket->iSize, pPacket->dts, pPacket->pts);
         //if (iDecoderState & VC_AGAIN)
         //  CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iDecoderState: VC_AGAIN");
@@ -759,18 +774,18 @@ CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::Process about to decode pts: %f drop: 
         if (iDecoderState & VC_ERROR)
         {
           CLog::Log(LOGDEBUG, "CDVDPlayerVideo - video decoder returned error");
+
           break;
         }
 
-        // try to hurry the decoder up for next call if playing at normal speed and we haven't been given a picture in a while (1.75 * frametime)
+        // try to hurry the decoder up for next call if playing at normal speed and we haven't been given a picture in a while (2.5 * frametime)
         double fDecodedPictureClock = CDVDClock::GetAbsoluteClock(true);
-        if (m_fLastDecodedPictureClock != DVD_NOPTS_VALUE && 
-            m_fPrevLastDecodedPictureClock != DVD_NOPTS_VALUE && 
+        if (m_started && fDecodedPictureClock - fStartedClock > 50 * frametime &&
             speed == DVD_PLAYSPEED_NORMAL &&
-            fDecodedPictureClock - m_fLastDecodedPictureClock > 1.75 * frametime && 
-            fDecodedPictureClock - m_fPrevLastDecodedPictureClock > 2.75 * frametime)
+            fDecodedPictureClock - fLastDecodedPictureClock > 2.5 * frametime && 
+            fDecodedPictureClock - fPrevLastDecodedPictureClock > 3.5 * frametime)
         {
-CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %f fDecodedPictureClock: %f frametime: %f", m_fLastDecodedPictureClock, fDecodedPictureClock, frametime);
+CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up fLastDecodedPictureClock: %f fDecodedPictureClock: %f frametime: %f", fLastDecodedPictureClock, fDecodedPictureClock, frametime);
             bHurryUpDecode = true;
         }
 
@@ -785,8 +800,8 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
         if (iDecoderState & VC_PICTURE)
         {
           // we have decoded a picture for output
-          m_fPrevLastDecodedPictureClock = m_fLastDecodedPictureClock;
-          m_fLastDecodedPictureClock = fDecodedPictureClock;
+          fPrevLastDecodedPictureClock = fLastDecodedPictureClock;
+          fLastDecodedPictureClock = fDecodedPictureClock;
 
           // prepare picture event message for output thread
           // determine if picture should be dropped on output (after it has extracted timing info):
@@ -843,11 +858,19 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
              //   Sleep(10);
              //}
 
-             CSingleLock lock(m_outputSection);
+             //TODO: move the reconfigure to a function to reduce clutter (should return 3 possible states, reschange, noreschange, error)
+             std::string formatstr;
+             SOutputConfiguration outputFormat;
+             { CSingleLock lock(m_outputSection);
+               formatstr = m_formatstr;
+               outputFormat = m_output;
+             }
+             bool bFpsInvalid = m_bFpsInvalid; //TODO: add lock for correctness
 
              // check if resolution is going to change and clear down
              // resources in this case
-             bResChange = g_renderManager.CheckResolutionChange(m_bFpsInvalid ? 0.0 : m_output.framerate);
+             //bResChange = g_renderManager.CheckResolutionChange(m_bFpsInvalid ? 0.0 : m_output.framerate);
+             bResChange = g_renderManager.CheckResolutionChange(bFpsInvalid ? 0.0 : outputFormat.framerate);
              if (bResChange)
              {
                 m_pVideoOutput->Unconfigure();
@@ -857,6 +880,11 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
                 SetRefreshChanging(true);
              }
 
+             //CLog::Log(LOGDEBUG,"%s - change configuration. %dx%d. framerate: %4.2f. format: %s",__FUNCTION__,
+             //                                                       m_output.width,
+             //                                                       m_output.height,
+             //                                                       m_bFpsInvalid ? 0.0 : m_output.framerate,
+             //                                                       m_formatstr.c_str());
              CLog::Log(LOGDEBUG,"%s - change configuration. %dx%d. framerate: %4.2f. format: %s",__FUNCTION__,
                                                                     m_output.width,
                                                                     m_output.height,
@@ -873,7 +901,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
                CLog::Log(LOGERROR, "%s - failed to configure renderer", __FUNCTION__);
                //TODO: what should we do now?
              }
-             lock.Leave();
+             //lock.Leave();
 
              if (bResChange)
              {
@@ -900,6 +928,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
            {
               m_codecname = m_pVideoCodec->GetName();
               m_started = true;
+              fStartedClock = CDVDClock::GetAbsoluteClock(true);
               m_messageParent.Put(new CDVDMsgInt(CDVDMsg::PLAYER_STARTED, DVDPLAYER_VIDEO));
            }
 
@@ -918,8 +947,10 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
           bFreeDecoderBuffer = false;
           break;
         }
+        else
+          bFreeDecoderBuffer = true;
 
-        if ( (bStreamEOF && (CDVDClock::GetAbsoluteClock(true) - m_fLastDecodedPictureClock < DVD_MSEC_TO_TIME(500))) ||
+        if ( (bStreamEOF && (CDVDClock::GetAbsoluteClock(true) - fLastDecodedPictureClock < DVD_MSEC_TO_TIME(500))) ||
              (!bStreamEOF && !(iDecoderState & VC_BUFFER)) )
         {
           // the decoder didn't want more data, so do a drain (hurry up) call with no input data
@@ -928,7 +959,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up m_fLastDecodedPictureClock: %
              iDecoderHint |= VC_HINT_NOPOSTPROC;
           if (bStreamEOF)
           {
-             CLog::Log(LOGNOTICE, "ASB: CDVDPlayerVideo VC_HINT_HARDDRAIN");
+             CLog::Log(LOGDEBUG, "CDVDPlayerVideo VC_HINT_HARDDRAIN");
              iDecoderHint |= VC_HINT_HARDDRAIN;
              // send an expect delay message to output thread
              double delay = DVD_MSEC_TO_TIME(200);
@@ -1061,7 +1092,7 @@ int CDVDPlayerVideo::CalcDropRequirement()
   if (iClockSpeed != iDPlaySpeed || iDPlaySpeed == DVD_PLAYSPEED_PAUSE || iClockSpeed == DVD_PLAYSPEED_PAUSE)
   {
      m_dropinfo.iVeryLateCount = 0;
-CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySpeed == DVD_PLAYSPEED_PAUSE || iClockSpeed == DVD_PLAYSPEED_PAUSE");
+//CLog::Log(LOGDEBUG, "ASB: CalcDropRequirement iClockSpeed != iDPlaySpeed || iDPlaySpeed == DVD_PLAYSPEED_PAUSE || iClockSpeed == DVD_PLAYSPEED_PAUSE");
      return 0;
   }
 
@@ -1250,9 +1281,9 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySp
            double incr = 0.03 * std::max(0.0, (fLatenessAvgT - fLatenessAvgTMinus1) / (fClockMidT - fClockMidTMinus1));
            // if we are not getting later and we are not late then reduce m_dropinfo.fDropRatio with more rapidity
            if (fLatenessAvgT <= 0.0 && fLatenessAvgT <= fLatenessAvgTMinus1)
-              m_dropinfo.fDropRatio = 0.99 * m_dropinfo.fDropRatio;
+              m_dropinfo.fDropRatio = 0.98 * m_dropinfo.fDropRatio;
            else
-              m_dropinfo.fDropRatio = std::max(0.0, (0.995 * m_dropinfo.fDropRatio) + incr);
+              m_dropinfo.fDropRatio = std::max(0.0, (0.99 * m_dropinfo.fDropRatio) + incr);
            m_dropinfo.fDropRatio = std::min(0.95, m_dropinfo.fDropRatio); //constrain to 0.95
 
            // store the new drop ratio in playspeed record if appropriate
@@ -1269,7 +1300,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySp
         {
            if (fLatenessAvgT > DVD_MSEC_TO_TIME(40))
               m_dropinfo.iVeryLateCount++;
-           else if (fLatenessAvgT > 0.0)
+           else if (fLatenessAvgT > 0.0 && m_dropinfo.iVeryLateCount > 0)
               m_dropinfo.iVeryLateCount--;
            else
               m_dropinfo.iVeryLateCount = 0;
@@ -1277,14 +1308,15 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySp
            if (fLatenessAvgT > DVD_MSEC_TO_TIME(50))
               iDropRequestDistance = 4;
            else if (fLatenessAvgT > fDInterval)
-              iDropRequestDistance = 6;
+              iDropRequestDistance = 7;
            else
-              iDropRequestDistance = 8;
+              iDropRequestDistance = 9;
 
+//CLog::Log(LOGDEBUG, "ASB: CalcDropRequirement bGotSamplesT && fLatenessAvgT > 0.0 && m_dropinfo.fDropRatio <= fDropRatioThreshold   fLatenessAvgT: %f fDInterval: %f m_dropinfo.fDropRatio: %f iDropRequestDistance: %i m_dropinfo.iVeryLateCount: %i iLastDecoderDropRequestCalcId: %i iOsc: %i iCalcId: %i iLastDecoderDropRequestDecoderDrops: %i iDecoderDrops: %i", fLatenessAvgT, fDInterval, m_dropinfo.fDropRatio, iDropRequestDistance, m_dropinfo.iVeryLateCount, iLastDecoderDropRequestCalcId, iOsc, iCalcId, iLastDecoderDropRequestDecoderDrops, iDecoderDrops);
            // drop request at required distance or if it seems last drop request did not succeed and we are quite late
            if ((iLastDecoderDropRequestCalcId + iDropRequestDistance + iOsc < iCalcId) ||
                  (iLastDecoderDropRequestDecoderDrops == iDecoderDrops && fLatenessAvgT > fDInterval &&
-                   iLastDecoderDropRequestCalcId + 5 < iCalcId))
+                   iLastDecoderDropRequestCalcId + 5 + iOsc < iCalcId))
            {
               // try to drop subtle (eg do post decode decoder drop when interlaced if supported in codec decode)
               // if less than a display interval
@@ -1298,7 +1330,7 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySp
         {
            if (fLatenessAvgT > DVD_MSEC_TO_TIME(40))
               m_dropinfo.iVeryLateCount++;
-           else if (fLatenessAvgT > 0.0)
+           else if (fLatenessAvgT > 0.0 && m_dropinfo.iVeryLateCount > 0)
               m_dropinfo.iVeryLateCount--;
            else
               m_dropinfo.iVeryLateCount = 0;
@@ -1313,8 +1345,12 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySp
               iDropRequestDistance = std::max(1, std::min(iDropRequestDistance - iDropMore, iDropRequestDistance / 3));
               //iDropRequestDistance = std::max(1, (iDropRequestDistance / 3));
            }
+           else if (fLatenessAvgT > fDInterval / 2)
+              iDropRequestDistance = std::max(2, (iDropRequestDistance / 2));
            else if (fLatenessAvgT > 0.0)
-              iDropRequestDistance = std::max(1, (iDropRequestDistance / 2));
+              iDropRequestDistance = std::max(3, (iDropRequestDistance));
+           else 
+              iDropRequestDistance = std::max(5, iDropRequestDistance * 2);
            //iDropRequestDistance = std::max(1, iDropRequestDistance - iDropMore);
 
            bool bDropEarly = false;
@@ -1327,8 +1363,9 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySp
               bDropEarly = true;
 
            if ((bDropEarly && iCalcId - iLastDecoderDropRequestCalcId - iDropRequestDistance > iOsc) ||
-                 (iLastDecoderDropRequestDecoderDrops == iDecoderDrops && iLastDecoderDropRequestCalcId + 2 < iCalcId))
+                 (iLastDecoderDropRequestDecoderDrops == iDecoderDrops && iLastDecoderDropRequestCalcId + 2 + iOsc < iCalcId))
            {
+//CLog::Log(LOGDEBUG, "ASB: CalcDropRequirement bGotSamplesT && m_dropinfo.fDropRatio > fDropRatioThreshold   fLatenessAvgT: %f fDInterval: %f m_dropinfo.fDropRatio: %f iDropRequestDistance: %i m_dropinfo.iVeryLateCount: %i iLastDecoderDropRequestCalcId: %i iOsc: %i iCalcId: %i iLastDecoderDropRequestDecoderDrops: %i iDecoderDrops: %i bDropEarly: %i", fLatenessAvgT, fDInterval, m_dropinfo.fDropRatio, iDropRequestDistance, m_dropinfo.iVeryLateCount, iLastDecoderDropRequestCalcId, iOsc, iCalcId, iLastDecoderDropRequestDecoderDrops, iDecoderDrops, (int)bDropEarly);
               m_dropinfo.iDropNextFrame = DC_DECODER;
            }
         }
@@ -1336,12 +1373,13 @@ CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo iClockSpeed != iDPlaySpeed || iDPlaySp
         {
               m_dropinfo.iVeryLateCount = 0;
         }
+//TODO: if lateness does not change by more than 20% of a duration for 2 seconds then just drop every 5, then 4 next 1 sec, then 3 next 1 sec anyway - catchall
            // if we have not requested a drop so far and we are not late check the drift, update the dropPS and drop if we are close to being late and current dropPS dictates?
-if (fLateness > 0.0)
-CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo m_dropinfo.iDropNextFrame: %i lateness: %f fLatenessAvgT: %f fDInterval: %f m_dropinfo.fDropRatio: %f iDropRequestDistance: %i m_dropinfo.iVeryLateCount: %i", m_dropinfo.iDropNextFrame, fLateness, fLatenessAvgT, fDInterval, m_dropinfo.fDropRatio, iDropRequestDistance, m_dropinfo.iVeryLateCount);
+//if (fLateness > 0.0)
+//CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo m_dropinfo.iDropNextFrame: %i lateness: %f fLatenessAvgT: %f fDInterval: %f m_dropinfo.fDropRatio: %f iDropRequestDistance: %i m_dropinfo.iVeryLateCount: %i", m_dropinfo.iDropNextFrame, fLateness, fLatenessAvgT, fDInterval, m_dropinfo.fDropRatio, iDropRequestDistance, m_dropinfo.iVeryLateCount);
      }
 if (m_dropinfo.iDropNextFrame)
-CLog::Log(LOGNOTICE, "ASB: CDVDPlayerVideo m_dropinfo.iDropNextFrame: %i lateness: %f", m_dropinfo.iDropNextFrame, fLateness);
+CLog::Log(LOGNOTICE, "ASB: CalcDropInfo m_dropinfo.iDropNextFrame: %i lateness: %f", m_dropinfo.iDropNextFrame, fLateness);
   }
   else if (iDPlaySpeed < 0)
   {
@@ -1364,7 +1402,6 @@ CLog::Log(LOGNOTICE, "ASB: CDVDPlayerVideo m_dropinfo.iDropNextFrame: %i latenes
   }
   if (m_dropinfo.iDropNextFrame & DC_OUTPUT)
   {
-     // adjust the oscillator
      m_dropinfo.iLastOutputDropRequestCalcId = iCalcId;
   }
   // update the successive drop request value to expose simply
@@ -1498,7 +1535,7 @@ void CDVDPlayerVideo::SetPlaySpeed(int speed)
 
 void CDVDPlayerVideo::SetSpeed(int speed)
 {
-CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::SetSpeed speed: %i m_messageQueue.IsInited(): %i", speed, (int)m_messageQueue.IsInited());
+//CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::SetSpeed speed: %i m_messageQueue.IsInited(): %i", speed, (int)m_messageQueue.IsInited());
   if(m_messageQueue.IsInited())
     m_messageQueue.Put( new CDVDMsgInt(CDVDMsg::PLAYER_SETSPEED, speed), 1 );
   else
@@ -1556,8 +1593,12 @@ void CDVDPlayerVideo::Flush()
   /* flush using message as this get's called from dvdplayer thread */
   /* and any demux packet that has been taken out of queue need to */
   /* be disposed of before we flush */
+CLog::Log(LOGDEBUG, "CDVDPlayerVideo::Flush()");
+
   m_messageQueue.Flush();
+CLog::Log(LOGDEBUG, "CDVDPlayerVideo::Flush() done m_messageQueue.Flush()");
   m_messageQueue.Put(new CDVDMsg(CDVDMsg::GENERAL_FLUSH), 1);
+CLog::Log(LOGDEBUG, "CDVDPlayerVideo::Flush() done put CDVDMsg::GENERAL_FLUSH");
 }
 
 #ifdef HAS_VIDEO_PLAYBACK
@@ -1870,7 +1911,7 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, int p
 
   int result = 0;
 
-CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::OutputPicture pts: %f", pts);
+//CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::OutputPicture pts: %f", pts);
 
   if (pPicture->iFlags & DVP_FLAG_DROPPED)
   {
@@ -1947,7 +1988,7 @@ CLog::Log(LOGDEBUG,"ASB: CDVDPlayerVideo::OutputPicture pts: %f", pts);
     return EOS_DROPPED;
   }
 
-CLog::Log(LOGDEBUG,"ASB: OutputPicture About to AddVideoPicture tickClock: %f fPlayingClock: %f fPresentClock: %f fClockSleep: %f fCurrentClock: %f playSpeed: %i pts: %f prevPlaySpeed: %i, resync: %i", m_pClock->GetClock(false), fPlayingClock, fPresentClock, fClockSleep, fCurrentClock, playSpeed, pts, prevPlaySpeed, (int)resync);
+//CLog::Log(LOGDEBUG,"ASB: OutputPicture About to AddVideoPicture tickClock: %f fPlayingClock: %f fPresentClock: %f fClockSleep: %f fCurrentClock: %f playSpeed: %i pts: %f prevPlaySpeed: %i, resync: %i", m_pClock->GetClock(false), fPlayingClock, fPresentClock, fClockSleep, fCurrentClock, playSpeed, pts, prevPlaySpeed, (int)resync);
   index = g_renderManager.AddVideoPicture(*pPicture, pts, fPresentClock, playSpeed, resync);
 
   // try repeatedly for 0.5 sec to add again if it failed for some reason
