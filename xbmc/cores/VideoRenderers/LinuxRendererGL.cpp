@@ -873,6 +873,11 @@ int CLinuxRendererGL::GetNextRenderBufferIndex()
   return (m_iCurrentRenderBuffer + 1) % m_NumRenderBuffers;
 }
 
+int CLinuxRendererGL::FramesInBuffers()
+{
+  return (m_iCurrentRenderBuffer - m_iDisplayedRenderBuffer + m_NumRenderBuffers) % m_NumRenderBuffers;
+}
+
 void CLinuxRendererGL::ReleaseProcessor()
 {
 //  m_bValidated = false;

@@ -60,7 +60,7 @@ void CDVDPlayerVideoOutput::Reset()
   m_dataPort.Purge();
   m_controlPort.Purge();
 
-  SendControlMessage(ControlProtocol::RESET);
+  SendControlMessage(ControlProtocol::RESET,0,0,true, 1000);
 }
 
 void CDVDPlayerVideoOutput::ReleaseCodec()
@@ -70,6 +70,8 @@ void CDVDPlayerVideoOutput::ReleaseCodec()
 
 void CDVDPlayerVideoOutput::Unconfigure()
 {
+  m_dataPort.Purge();
+  m_controlPort.Purge();
   SendControlMessage(ControlProtocol::UNCONFIGURE,0,0,true, 1000);
 }
 
@@ -489,7 +491,7 @@ void CDVDPlayerVideoOutput::StateMachine(int signal, Protocol *port, Message *ms
 
           bool bNeedReconfigure;
           bNeedReconfigure = false;
-          m_bGotPicture = GetPicture(m_extPts, m_extFrametime);
+          m_bGotPicture = GetPicture(m_extPts, m_extFrametime, m_extDrop);
           if (m_bGotPicture)
             bNeedReconfigure = m_pVideoPlayer->CheckRenderConfig(&m_picture);
           if (bNeedReconfigure)
@@ -498,11 +500,13 @@ void CDVDPlayerVideoOutput::StateMachine(int signal, Protocol *port, Message *ms
             m_state = TOP_CONFIGURED_RECONFIGURING;
             m_dataPort.DeferOut(true);
           }
-          else
+          else if (m_bGotPicture)
           {
             m_state = TOP_CONFIGURED_CLOCKSYNC;
             m_bStateMachineSelfTrigger = true;
           }
+          else
+            m_extTimeout = 1000;
           return;
         default:
           break;
@@ -512,7 +516,7 @@ void CDVDPlayerVideoOutput::StateMachine(int signal, Protocol *port, Message *ms
       {
         switch (signal)
         {
-        case -1:
+        case ControlProtocol::TIMEOUT:
           m_dataPort.SendOutMessage(DataProtocol::NEWPIC);
           m_extTimeout = 100;
           return;
@@ -529,9 +533,10 @@ void CDVDPlayerVideoOutput::StateMachine(int signal, Protocol *port, Message *ms
         {
         case DataProtocol::NEWPIC:
           m_extResync = false;
-          if (m_extPrevOutputSpeed == DVD_PLAYSPEED_PAUSE && m_extPlayerSpeed != DVD_PLAYSPEED_PAUSE)
+          if (m_extPlayerStarted && m_extPrevOutputSpeed == DVD_PLAYSPEED_PAUSE && m_extPlayerSpeed != DVD_PLAYSPEED_PAUSE)
           {
             ResyncClockToVideo(m_extPts + m_extVideoDelay, m_extPlayerSpeed, m_extClockFlush);
+            m_extClockFlush = false;
             m_extResync = true;
           }
 
@@ -704,8 +709,15 @@ void CDVDPlayerVideoOutput::Process()
     }
     else
     {
+      msg = m_controlPort.GetMessage();
+      msg->signal = ControlProtocol::TIMEOUT;
       // signal timeout to state machine
-      StateMachine(-1, NULL, NULL);
+      StateMachine(msg->signal, NULL, msg);
+      if (!m_bStateMachineSelfTrigger)
+      {
+        msg->Release();
+        msg = NULL;
+      }
     }
   }
   DestroyGlxContext();
@@ -732,7 +744,7 @@ bool CDVDPlayerVideoOutput::GetPicture(double& pts, double& frametime, bool drop
 
     //TODO: store untouched pts and dts values in ring buffer of say 20 entries to allow decoder flush to make a better job of starting from correct place
 
-CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideoOutput::GetPicture pts: %f", m_picture.pts);
+//CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideoOutput::GetPicture pts: %f", m_picture.pts);
     // validate picture timing,
     // if both pts invalid, use pts calculated from previous pts and iDuration
     // if still invalid use dts, else use picture.pts as passed

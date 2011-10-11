@@ -24,6 +24,15 @@
 
 void Message::Release()
 {
+  bool skip;
+  origin->Lock();
+  skip = isSync ? !isSyncFini : false;
+  isSyncFini = true;
+  origin->Unlock();
+
+  if (skip)
+    return;
+
   // free data buffer
   if (data != buffer)
     delete [] data;
@@ -98,6 +107,7 @@ Message *Protocol::GetMessage()
     msg = new Message();
 
   msg->isSync = false;
+  msg->isSyncFini = false;
   msg->isSyncTimeout = false;
   msg->event = NULL;
   msg->data = NULL;
@@ -195,6 +205,8 @@ bool Protocol::SendOutMessageSync(int signal, Message **retMsg, int timeout, voi
   }
   else
     *retMsg = msg->replyMessage;
+
+  msg->Release();
 
   if (*retMsg)
     return true;

@@ -1929,8 +1929,11 @@ bool CApplication::RenderNoPresent()
     //if (m_bPresentFrame && IsPlaying() && !IsPaused())
     if (m_bPresentFrame && IsPlaying() && (!IsPaused() || now - m_lastNotPausedTime < 1000))
     {
+      int frameCount;
       ResetScreenSaver();
-      g_renderManager.Present();
+      g_renderManager.Present(frameCount);
+      CSingleLock lock(m_frameMutex);
+      m_frameCount = frameCount + 1;
     }
     else
       g_renderManager.RenderUpdate(true);
@@ -2003,7 +2006,6 @@ void CApplication::NewFrame()
     CSingleLock lock(m_frameMutex);
     m_frameCount++;
   }
-
 
   m_frameCond.notifyAll();
 }

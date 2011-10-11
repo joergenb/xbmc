@@ -681,7 +681,7 @@ float CXBMCRenderManager::GetMaximumFPS()
   return fps;
 }
 
-void CXBMCRenderManager::Present()
+void CXBMCRenderManager::Present(int &frameCount)
 {
   { CRetakeLock<CExclusiveLock> lock(m_sharedSection);
     if (!m_pRenderer)
@@ -720,6 +720,8 @@ void CXBMCRenderManager::Present()
   m_presentevent.Set();
 
   m_overlays.Render();
+
+  frameCount = m_pRenderer->FramesInBuffers();
 
   lock.Leave();
 

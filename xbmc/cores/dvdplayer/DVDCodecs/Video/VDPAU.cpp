@@ -1831,6 +1831,8 @@ bool CVDPAU::QueueIsFull(bool wait /* = false */)
     return false;
 
   m_queueSignal.Reset();
+  int msgs, iFreePics, usedPics;
+  int reported = 0;
 
   if (m_vdpauOutputMethod == OUTPUT_GL_INTEROP_YUV)
   {
@@ -1842,11 +1844,17 @@ bool CVDPAU::QueueIsFull(bool wait /* = false */)
   {
     // always ensure we have at least 1 free pic (ie assume full if only 1 freeOutPic) so that mixer cannot be starved
     CSingleLock lockm(m_mixerSec);
-    int msgs = m_mixerMessages.size();
+    msgs = m_mixerMessages.size();
     lockm.Leave();
     CSingleLock locku(m_outPicSec);
-    int iFreePics = m_freeOutPic.size();
+    iFreePics = m_freeOutPic.size();
     int iNotFreePics = m_outPicsNum - iFreePics;
+    usedPics = m_usedOutPic.size();
+    for (int i=0; i<2 && i<usedPics; i++)
+    {
+      if (m_usedOutPic[i]->reported)
+        reported++;
+    }
     locku.Leave();
 
     // assume for simplicity 2 output pics can come from one frame message if de-interlacing via mixer
@@ -1860,8 +1868,12 @@ bool CVDPAU::QueueIsFull(bool wait /* = false */)
 
 //CLog::Log(LOGDEBUG,"ASB: CVDPAU::QueueIsFull m_queueSignal.WaitMSec(100)");
   // if we get an event assume there is work to do
-  if (wait && m_queueSignal.WaitMSec(100))
+  if (wait && reported >= 2 && m_queueSignal.WaitMSec(20))
+  {
+//CLog::Log(LOGNOTICE,"------------ free: %d, msgs: %d, used: %d, reported: %d"
+//       , iFreePics, msgs, usedPics, reported);
     return false;
+  }
 
   return true;
 }
@@ -1929,7 +1941,7 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
      targetUsed = std::min(std::min(m_outPicsNum - 1, totalAvailableOutputSurfaces), 5);
   else if (m_vdpauOutputMethod == OUTPUT_GL_INTEROP_RGB) //target around 4 if sensible
      //targetUsed = std::min(m_outPicsNum - NUM_RENDERBUF_PICS - 1, 3);
-     targetUsed = std::min(m_outPicsNum - 1, 4);
+     targetUsed = std::min(m_outPicsNum - 1, 3);
   else //OUTPUT_GL_INTEROP_YUV, target around 3 if sensible
      //targetUsed = std::min(m_outPicsNum - NUM_RENDERBUF_PICS - 1, 3);
      targetUsed = std::min(m_outPicsNum, 3);
@@ -2034,7 +2046,7 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
       if (firstNotReportedPic) //we have not reported about this usedPic yet
       {
         firstNotReportedPic->reported = true;
-        retval = VC_PICTURE;
+        retval |= VC_PICTURE;
         break;
       }
       //loop again to check to see if GetPicture has been called if asked to drain
@@ -2059,6 +2071,7 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
   int msgsFactor = m_bVdpauDeinterlacing ? 2 : 1; //how many usedPics can come out of 1 mixer input msg
   bool dropped = false;
   bool prevNotEmpty = true;
+  int noOfReportedPics = 0;
 //CLog::Log(LOGDEBUG,"ASB: CVDPAU::Decode bSoftDrain: %i targetUsed: %i m_usedOutPic.size(): %i m_presentOutPic.size(): %i m_mixerMessages.size(): %i", (int)bSoftDrain, targetUsed, m_usedOutPic.size(), m_presentOutPic.size(), m_mixerMessages.size());
   while (++iter < 2000)
   {
@@ -2081,6 +2094,8 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
           firstNotReportedPicIndex = i;
           break;
         }
+        else
+          noOfReportedPics++;
       }
 
       if ( firstNotReportedPic &&
@@ -2099,6 +2114,7 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
 //CLog::Log(LOGDEBUG, "ASB: CVDPAU::Decode: break loop with not first pic drop at iter: %i", iter);
           break;
 }
+CLog::Log(LOGNOTICE, "---------------------- vdpau drop");
         m_freeOutPic.push_back(firstNotReportedPic);
         m_usedOutPic.erase(m_usedOutPic.begin()+firstNotReportedPicIndex);
         lock.Leave();
@@ -2112,10 +2128,11 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
       // if not asked to drain and not enough data queued then request more data - don't tell caller there is a picture
       // in order to promote pre-buffering.
       if ((!bSoftDrain) && usedPics < targetUsed && (!QueueIsFull()))
-{
+      {
 //CLog::Log(LOGDEBUG, "ASB: CVDPAU::Decode: break loop with no-soft-drain and not teached targetUsed at iter: %i", iter);
-        return VC_BUFFER;
-}
+        retval |= VC_BUFFER;
+        break;
+      }
 
       if (firstNotReportedPic) //we have not reported about this usedPic yet
       {
@@ -2159,6 +2176,8 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
     // wait if we have enough msgs but don't have an output from mixer
     // if everything is running smooth, we won't wait here
 
+    usedPics -= noOfReportedPics;
+
     { CSingleLock lock(m_mixerSec);
       msgs = m_mixerMessages.size();
     }
@@ -2182,7 +2201,9 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
       if (bSoftDrain && !bHardDrain)
       {
         if (usedPics == 0 && m_picSignal.WaitMSec(100))
+        {
           continue;
+        }
         //else if (iter < 200)
         else if (CurrentHostCounter() - starttime < (int64_t)50 * CurrentHostFrequency() / 1000 ) //50ms
         {
@@ -2233,7 +2254,7 @@ int CVDPAU::Decode(AVCodecContext *avctx, AVFrame *pFrame, bool bSoftDrain, bool
     break;
   }// while
 
-  if (!QueueIsFull())
+  if (!QueueIsFull() || msgs < 1)
      retval |= VC_BUFFER;
 //CLog::Log(LOGDEBUG, "ASB: CVDPAU::Decode: return %i iter: %i, now: %"PRId64", starttime: %"PRId64"", retval, iter, CurrentHostCounter(), starttime);
   return retval;
@@ -2277,7 +2298,7 @@ bool CVDPAU::GetPicture(AVCodecContext* avctx, AVFrame* frame, DVDVideoPicture* 
   //  CLog::Log(LOGWARNING,"CVDPAU::GetPicture: old presentPicture was still valid - now discarded");
   //CSingleLock lock1(m_flipSec);
   CSingleLock lock(m_outPicSec);
-  if (m_usedOutPic.size() > 0)
+  if (m_usedOutPic.size() > 0 && m_usedOutPic.front()->reported)
   {
     OutputPicture *pic = m_usedOutPic.front();
     //m_presentPicture = m_usedOutPic.front();
@@ -2465,9 +2486,12 @@ void CVDPAU::Present(int flipBufferIdx)
     OutputPicture *pic = m_presentOutPic.back();
     lock.Leave();
     { CSingleLock lock(m_flipSec);
-      m_flipBuffer[flipBufferIdx] = pic; }
+      if (m_flipBuffer[flipBufferIdx] != NULL)
+        CLog::Log(LOGERROR,"----------------- flip buffer not null");
+      m_flipBuffer[flipBufferIdx] = pic;
+    }
 
-CLog::Log(LOGDEBUG, "CVDPAU::Present done flipped flipBufferIdx: %i pic: %u m_presentOutPic.size(): %i", flipBufferIdx, (unsigned int)pic, m_presentOutPic.size());
+//CLog::Log(LOGDEBUG, "CVDPAU::Present done flipped flipBufferIdx: %i pic: %u m_presentOutPic.size(): %i", flipBufferIdx, (unsigned int)pic, m_presentOutPic.size());
   }
   else
     CLog::Log(LOGWARNING, "CVDPAU::Present Failed to move flip buffer as there is no present picture");

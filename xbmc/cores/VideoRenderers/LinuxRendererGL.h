@@ -140,6 +140,7 @@ public:
   virtual int          GetNextRenderBufferIndex();
   virtual void         ReleaseProcessor();
   virtual void         LogBuffers();
+  virtual int          FramesInBuffers();
 
 #ifdef HAVE_LIBVDPAU
   virtual void         AddProcessor(CVDPAU* vdpau);

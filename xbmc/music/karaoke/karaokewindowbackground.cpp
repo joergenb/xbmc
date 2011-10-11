@@ -162,7 +162,10 @@ void CKaraokeWindowBackground::Render()
   {
 #ifdef HAS_VIDEO_PLAYBACK
     if ( g_application.IsPresentFrame() )
-      g_renderManager.Present();
+    {
+      int frameCount;
+      g_renderManager.Present(frameCount);
+    }
     else
       g_renderManager.RenderUpdate(true, 0, 255);
 #endif

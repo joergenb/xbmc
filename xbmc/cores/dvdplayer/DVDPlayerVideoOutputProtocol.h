@@ -36,6 +36,7 @@ class Message
 public:
   int signal;
   bool isSync;
+  bool isSyncFini;
   bool isOut;
   bool isSyncTimeout;
   int payloadSize;
@@ -96,6 +97,7 @@ public:
     EXPECTDELAY,
     SPEEDCHANGE,
     DEALLOCPIC,
+    TIMEOUT,
   };
   enum InSignal
   {

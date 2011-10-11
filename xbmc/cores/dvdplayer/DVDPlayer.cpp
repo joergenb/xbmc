@@ -1525,7 +1525,7 @@ void CDVDPlayer::HandlePlaySpeed()
     }
     else
     {
-CLog::Log(LOGDEBUG, "ASB: pMsg->IsType(CDVDMsg::PLAYER_SETSPEED");
+//CLog::Log(LOGDEBUG, "ASB: pMsg->IsType(CDVDMsg::PLAYER_SETSPEED");
       /* ensure that automatically started players are stopped while caching */
       m_clock.SetSpeed(DVD_PLAYSPEED_PAUSE); //ASB: added as surely we also need to pause the clock
       if (m_CurrentAudio.started)

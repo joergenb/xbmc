@@ -776,8 +776,8 @@ CLog::Log(LOGDEBUG, "CDVDPlayerVideo VC_HINT_HARDDRAIN");
         // try to hurry the decoder up for next call if playing at normal speed and we haven't been given a picture in a while (2.5 * frametime)
         double fDecodedPictureClock = CDVDClock::GetAbsoluteClock(true);
         if (m_started && fDecodedPictureClock - fStartedClock > 50 * frametime &&
-            speed == DVD_PLAYSPEED_NORMAL &&
-            fDecodedPictureClock - fLastDecodedPictureClock > 2.5 * frametime && 
+            speed == DVD_PLAYSPEED_NORMAL && m_bAllowDrop &&
+            fDecodedPictureClock - fLastDecodedPictureClock > 2.5 * frametime &&
             fDecodedPictureClock - fPrevLastDecodedPictureClock > 3.5 * frametime)
         {
 CLog::Log(LOGDEBUG, "ASB: CDVDPlayerVideo hurry up fLastDecodedPictureClock: %f fDecodedPictureClock: %f frametime: %f", fLastDecodedPictureClock, fDecodedPictureClock, frametime);
@@ -1909,6 +1909,7 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts, int p
   if (pPicture->iFlags & DVP_FLAG_DROPPED)
   {
     m_pVideoCodec->DiscardPicture();
+CLog::Log(LOGNOTICE,"---------------- EOS_DROPPED");
     return result | EOS_DROPPED;
   }
 
