@@ -343,6 +343,8 @@ void CDVDPlayerVideo::Process()
 
   m_videoStats.Start();
   SetRefreshChanging(false);
+  // tell other clock subscribers not to touch the clock for 5 seconds
+//  m_pClock->SetVideoIsController(5 * CurrentHostFrequency());
   
   while (!m_bStop)
   {
@@ -776,7 +778,7 @@ CLog::Log(LOGDEBUG, "CDVDPlayerVideo VC_HINT_HARDDRAIN");
         // try to hurry the decoder up for next call if playing at normal speed and we haven't been given a picture in a while (2.5 * frametime)
         double fDecodedPictureClock = CDVDClock::GetAbsoluteClock(true);
         if (m_started && fDecodedPictureClock - fStartedClock > 50 * frametime &&
-            speed == DVD_PLAYSPEED_NORMAL && m_bAllowDrop &&
+            speed == DVD_PLAYSPEED_NORMAL &&
             fDecodedPictureClock - fLastDecodedPictureClock > 2.5 * frametime &&
             fDecodedPictureClock - fPrevLastDecodedPictureClock > 3.5 * frametime)
         {

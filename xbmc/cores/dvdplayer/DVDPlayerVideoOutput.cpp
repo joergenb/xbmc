@@ -276,7 +276,7 @@ bool CDVDPlayerVideoOutput::ResyncClockToVideo(double pts, int playerSpeed, bool
          //maxTickAdjustOffer is number of ticks forward other subscribers can move the clock
          //adjustOfferExpirySys is system time when the offer expires
          //controlDurSys is how long we wish to be the clock controller (clock will remove control after this elapsed sys time
-         int64_t controlDurSys = 5 * CurrentHostFrequency(); //5 seconds
+         int64_t controlDurSys = 10 * CurrentHostFrequency(); //10 seconds
          int maxTickAdjustOffer = 2;
          int64_t adjustOfferExpirySys = (sleepMs - 5) * CurrentHostFrequency() / 1000; 
 

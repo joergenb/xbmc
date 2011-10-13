@@ -914,14 +914,14 @@ void CDVDVideoCodecFFmpeg::SetFrameFlagsFromHist(int iInputPktNum)
         if ((m_input_hist[bestmatch].field_no_out) || (m_iMaxDecoderIODelay < delay) ||
             (m_input_hist[bestmatch].input_pos > iInputPktNum))
         {
-           CLog::Log(LOGDEBUG,"CDVDVideoCodecFFmpeg::SetFrameFlags() decoder history search matched on unexpected data pts: %f, field_no_out: %i, drop: %i, flags: %i, input_pos: %i, current input packet number: %i", 
+           CLog::Log(LOGDEBUG,"CDVDVideoCodecFFmpeg::SetFrameFlagsFromHist() decoder history search matched on unexpected data pts: %f, field_no_out: %i, drop: %i, flags: %i, input_pos: %i, current input packet number: %i",
                pts_itod(m_input_hist[bestmatch].pts_opaque), (int)m_input_hist[bestmatch].field_no_out,
                (int)m_input_hist[bestmatch].drop, m_input_hist[bestmatch].flags, 
                m_input_hist[bestmatch].input_pos, iInputPktNum);
            // if not more than 5 increase in io delay then adjust our maximum to it
            if ((m_iMaxDecoderIODelay < delay) && (m_iMaxDecoderIODelay + 5 >= delay))
            {
-              CLog::Log(LOGDEBUG,"CDVDVideoCodecFFmpeg::SetFrameFlags() decoder history search, increasing max delay to %i", delay); 
+              CLog::Log(LOGDEBUG,"CDVDVideoCodecFFmpeg::SetFrameFlagsFromHist() decoder history search, increasing max delay to %i", delay);
               m_iMaxDecoderIODelay = delay;
            }
         }
@@ -935,7 +935,7 @@ void CDVDVideoCodecFFmpeg::SetFrameFlagsFromHist(int iInputPktNum)
 
      }
      else // we couldn't find our pts!
-        CLog::Log(LOGWARNING,"CDVDVideoCodecFFmpeg::SetFrameFlags() decoder history search could not find a match for pts: %f", pts_itod(picture_pts_opaque));
+        CLog::Log(LOGWARNING,"CDVDVideoCodecFFmpeg::SetFrameFlagsFromHist() decoder history search could not find a match for pts: %f", pts_itod(picture_pts_opaque));
   }
 }
 
@@ -961,11 +961,11 @@ void CDVDVideoCodecFFmpeg::ResetState()
   // reset the input history buffer
   for (int i = 0; i < INPUT_HISTBUFNUM; i++)
   {
-      m_input_hist[i].pts_opaque = DVD_NOPTS_VALUE;
-      m_input_hist[i].flags = 0;
-      m_input_hist[i].drop = false;
-      m_input_hist[i].field_no_out = false;
-      m_input_hist[i].input_pos = -1;
+    m_input_hist[i].pts_opaque = DVD_NOPTS_VALUE;
+    m_input_hist[i].flags = 0;
+    m_input_hist[i].drop = false;
+    m_input_hist[i].field_no_out = false;
+    m_input_hist[i].input_pos = -1;
   }
 }
 
@@ -973,8 +973,6 @@ void CDVDVideoCodecFFmpeg::Reset()
 {
   m_iLastKeyframe = m_pCodecContext->has_b_frames;
   m_dllAvCodec.avcodec_flush_buffers(m_pCodecContext);
-
-  ResetState();
 
   if (m_pHardware)
     m_pHardware->Reset();
@@ -987,6 +985,10 @@ void CDVDVideoCodecFFmpeg::Reset()
   }
   m_filters = "";
   FilterClose();
+
+  ResetState();
+
+  m_iLastKeyframe = m_pCodecContext->has_b_frames;
 }
 
 bool CDVDVideoCodecFFmpeg::GetPictureCommon(DVDVideoPicture* pDvdVideoPicture)

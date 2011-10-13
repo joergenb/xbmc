@@ -149,6 +149,9 @@ void CXBMCRenderManager::WaitPresentTime(double presenttime, bool reset_corr /* 
   //  then need to target a closer tick (resulting in a short or long display of a frame and if
   //  short likely subsequently a frame drop from player)
 
+  if (presenttime < 0.0)
+    return;  //bad data in just return and let stream play at refresh rate pace
+
   double signal_to_view_delay = GetDisplaySignalToViewDelay();
   double frametime;
   int fps = g_VideoReferenceClock.GetRefreshRate(&frametime);
@@ -1084,7 +1087,8 @@ void CXBMCRenderManager::UpdateDisplayInfo()
         // incorrectly)
         if (displayclockelapsed2 > (displayframedur1 + displayframedur2) * 0.95 && 
               displayclockelapsed2 < (displayframedur1 + displayframedur2) * 1.05 &&
-              displayclockelapsed1 <= 0.9 * displayrefreshdur)
+              displayclockelapsed2 - displayclockelapsed1 > displayframedur2 + 0.5 * displayrefreshdur &&
+              displayclockelapsed1 < displayrefreshdur * 0.9 && m_longdisplaycount > 0)
            m_longdisplaycount--;
      }
   }
@@ -1097,8 +1101,6 @@ void CXBMCRenderManager::NotifyDisplayFlip()
 
   UpdatePostFlipClock();
   UpdateDisplayInfo();
-
-CLog::Log(LOGDEBUG, "ASB: CXBMCRenderManager::NotifyDisplayFlip called with m_renderinfo.framepts: %f", m_renderinfo.framepts);
 
   CRetakeLock<CExclusiveLock> lock(m_sharedSection);
 
@@ -1130,8 +1132,11 @@ double CXBMCRenderManager::GetDisplaySignalToViewDelay()
   //       device and video signal method and allowing multiples of vblank duration
   //       eg possibly half vb is good estimate for analog display, but with digital 1 vb + internal processing delay)
 
-  // for now just go with half refresh duration
-  return (m_displayinfo[0].refreshdur / 2);
+  // for now just go with a single refresh duration
+  double displayrefreshdur = m_displayinfo[0].refreshdur;
+  if (displayrefreshdur == 0.0)
+    g_VideoReferenceClock.GetRefreshRate(&displayrefreshdur); //fps == 0 or less assume no vblank based reference clock
+  return displayrefreshdur;
 }
 
 double CXBMCRenderManager::GetDisplayDelay()
@@ -1169,7 +1174,6 @@ double CXBMCRenderManager::GetCurrentDisplayPts(int& playspeed, double& callcloc
      sampleclock = m_refdisplayinfo.frameclock;
   }
 
-  //if ( (playspeed == DVD_PLAYSPEED_PAUSE && clock >= m_displayinfo[0].frameclock) ||
   if ( (playspeed == DVD_PLAYSPEED_PAUSE) ||
        (clock >= m_displayinfo[0].frameclock + m_displayinfo[0].refreshdur) ) 
   {
@@ -1201,16 +1205,16 @@ void CXBMCRenderManager::CheckNextBuffer()
   if(presenttime - clocktime > MAXPRESENTDELAY)
     presenttime = clocktime + MAXPRESENTDELAY;
 
-  m_renderinfo.framepts = *image.pPts; //from image
-  m_renderinfo.frameId = *image.pId; //from image
-  m_renderinfo.frameplayspeed = *image.pPlaySpeed; //from image
-  m_renderinfo.framedur = *image.pFrameDur/DVD_TIME_BASE; //from image
-  m_vclockresync = *image.pVClockResync;
-
-//TODO: should we not do the below flip request step in even if late in non-fullscreen mode?
+  //TODO: we should not request flip too early and not flip too late...improve to give some of the display dislay logic and only present if within some acceptable range
   if(g_graphicsContext.IsFullScreenVideo()
       || presenttime <= clocktime)
   {
+    m_renderinfo.framepts = *image.pPts; //from image
+    m_renderinfo.frameId = *image.pId; //from image
+    m_renderinfo.frameplayspeed = *image.pPlaySpeed; //from image
+    m_renderinfo.framedur = *image.pFrameDur/DVD_TIME_BASE; //from image
+    m_vclockresync = *image.pVClockResync;
+
     m_presenttime  = presenttime;
     m_presentfield = *image.pSync;
     m_presentstep  = PRESENT_FLIP;
