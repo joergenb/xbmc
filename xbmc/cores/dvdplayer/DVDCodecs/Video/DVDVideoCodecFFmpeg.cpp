@@ -37,6 +37,7 @@
 #include "utils/log.h"
 #include "boost/shared_ptr.hpp"
 #include "threads/Atomics.h"
+#include "NalParser.h"
 
 #ifndef _LINUX
 #define RINT(x) ((x) >= 0 ? ((int)((x) + 0.5)) : ((int)((x) - 0.5)))
@@ -140,6 +141,8 @@ CDVDVideoCodecFFmpeg::CDVDVideoCodecFFmpeg() : CDVDVideoCodec()
   m_iLastKeyframe = 0;
   m_dts = DVD_NOPTS_VALUE;
   m_started = false;
+
+  m_bGotSPS = false;
 }
 
 CDVDVideoCodecFFmpeg::~CDVDVideoCodecFFmpeg()
@@ -387,6 +390,26 @@ int CDVDVideoCodecFFmpeg::Decode(BYTE* pData, int iSize, double dts, double pts)
 
   if (!m_pCodecContext)
     return VC_ERROR;
+
+  if (!m_bGotSPS && m_pCodecContext->codec_id == CODEC_ID_H264)
+  {
+    CParserH264 parser;
+    uint8_t *sps;
+    int len = iSize;
+    if (parser.FindSPS(pData, &sps, len))
+    {
+      parser.ParseSPS(sps, len);
+      m_iCodedWidth = parser.m_width;
+      m_iCodedHeight = parser.m_height;
+      m_iCropLeft = parser.crop_left;
+      m_iCropRight = parser.crop_right;
+      m_iCropTop = parser.crop_top;
+      m_iCropBottom = parser.crop_bottom;
+      m_bGotSPS = true;
+    }
+    else
+      return VC_BUFFER;
+  }
 
   if(pData)
     m_iLastKeyframe++;
@@ -854,4 +877,14 @@ unsigned CDVDVideoCodecFFmpeg::GetConvergeCount()
     return m_iLastKeyframe;
   else
     return 0;
+}
+
+void CDVDVideoCodecFFmpeg::GetH264Parameters(int &width, int &height, int &crop_left, int &crop_right, int &crop_top, int &crop_bottom)
+{
+  width = m_iCodedWidth;
+  height = m_iCodedHeight;
+  crop_left = m_iCropLeft;
+  crop_right = m_iCropRight;
+  crop_top = m_iCropTop;
+  crop_bottom = m_iCropBottom;
 }

@@ -61,6 +61,7 @@ public:
   virtual unsigned int SetFilters(unsigned int filters);
   virtual const char* GetName() { return m_name.c_str(); }; // m_name is never changed after open
   virtual unsigned GetConvergeCount();
+  void GetH264Parameters(int &width, int &height, int &crop_left, int &crop_right, int &crop_top, int &crop_bottom);
 
   bool               IsHardwareAllowed()                     { return !m_bSoftware; }
   IHardwareDecoder * GetHardware()                           { return m_pHardware; };
@@ -94,6 +95,11 @@ protected:
 
   int m_iScreenWidth;
   int m_iScreenHeight;
+
+  int  m_iCodedWidth;
+  int  m_iCodedHeight;
+  int  m_iCropLeft,m_iCropRight,m_iCropTop,m_iCropBottom;
+  bool m_bGotSPS;
 
   unsigned int m_uSurfacesCount;
 
