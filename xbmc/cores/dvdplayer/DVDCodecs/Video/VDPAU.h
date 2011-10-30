@@ -206,6 +206,8 @@ public:
   int      presentSurfaceNum;
   int      totalAvailableOutputSurfaces;
   uint32_t vid_width, vid_height;
+  int      surface_width, surface_height;
+  VdpRect  cropRect;
   uint32_t max_references;
   Display* m_Display;
   bool     vdpauConfigured;

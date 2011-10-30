@@ -34,6 +34,7 @@
 #include "Application.h"
 #include "utils/MathUtils.h"
 #include "DVDCodecs/DVDCodecUtils.h"
+#include "NalParser.h"
 
 #define ARSIZE(x) (sizeof(x) / sizeof((x)[0]))
 
@@ -1018,6 +1019,13 @@ int CVDPAU::FFGetBuffer(AVCodecContext *avctx, AVFrame *pic)
   {
     // create a new surface
     VdpDecoderProfile profile;
+
+    // only do this once
+    int left, right, top, bottom;
+    ctx->GetH264Parameters(vdp->surface_width, vdp->surface_height,
+                           left, right, top, bottom);
+
+
     ReadFormatOf(avctx->pix_fmt, profile, vdp->vdp_chroma_type);
     render = (vdpau_render_state*)calloc(sizeof(vdpau_render_state), 1);
     vdp_st = vdp->vdp_video_surface_create(vdp->vdp_device,
