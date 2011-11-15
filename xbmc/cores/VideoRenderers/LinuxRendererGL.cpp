@@ -741,8 +741,9 @@ unsigned int CLinuxRendererGL::PreInit()
 {
   CSingleLock lock(g_graphicsContext);
   m_bConfigured = false;
-  m_bValidated = false;
-  UnInit();
+  if (m_bValidated)
+    UnInit();
+
   m_resolution = g_guiSettings.m_LookAndFeelResolution;
   if ( m_resolution == RES_WINDOW )
     m_resolution = RES_DESKTOP;
@@ -2611,12 +2612,15 @@ bool CLinuxRendererGL::CreateXVBAyv12Texture(int index)
   im.planesize[1] = im.stride[1] * ( im.height >> im.cshift_y );
   im.planesize[2] = im.stride[2] * ( im.height >> im.cshift_y );
 
+  im.plane[1] = im.plane[2] = 0;
+  pbo[1] = pbo[2] = 0;
+
   bool pboSetup = false;
   if (m_pboUsed)
   {
     pboSetup = true;
-    glGenBuffersARB(1, pbo);
 
+    glGenBuffersARB(1, pbo);
     glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo[0]);
     glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, im.planesize[0] + im.planesize[0]/2 + PBO_OFFSET, 0, GL_STREAM_DRAW_ARB);
     void* pboPtr = glMapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY_ARB);
@@ -3609,7 +3613,7 @@ void CLinuxRendererGL::UnBindPbo(YUVBUFFER& buff)
     pbo = true;
 
     glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, buff.pbo[plane]);
-//    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, buff.image.planesize[plane] + PBO_OFFSET, NULL, GL_STREAM_DRAW_ARB);
+    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, buff.image.planesize[plane] + buff.image.planesize[plane]/2 + PBO_OFFSET, NULL, GL_STREAM_DRAW_ARB);
     buff.image.plane[plane] = (BYTE*)glMapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY_ARB) + PBO_OFFSET;
   }
   if(pbo)
