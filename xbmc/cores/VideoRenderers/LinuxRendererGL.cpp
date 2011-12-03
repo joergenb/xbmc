@@ -2484,7 +2484,6 @@ bool CLinuxRendererGL::CreateXVBATexture(int index)
   YV12Image &im     = m_buffers[index].image;
   YUVFIELDS &fields = m_buffers[index].fields;
   YUVPLANE  &plane  = fields[0][1];
-  GLuint    *pbo    = m_buffers[index].pbo;
 
   DeleteXVBATexture(index);
 
@@ -2512,7 +2511,6 @@ void CLinuxRendererGL::UploadXVBATexture(int index)
 #ifdef HAVE_LIBXVBA
   XVBA::CDecoder   *xvba = m_buffers[index].xvba;
 
-  unsigned int flipindex = m_buffers[index].flipindex;
   YUVFIELDS &fields = m_buffers[index].fields;
   YUVPLANE &plane = fields[0][1];
 
