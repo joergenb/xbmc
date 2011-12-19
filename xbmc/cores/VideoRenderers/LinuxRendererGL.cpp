@@ -2570,6 +2570,7 @@ void CLinuxRendererGL::UploadXVBATexture(int index)
 //********************************************************************************************************
 void CLinuxRendererGL::DeleteXVBAyv12Texture(int index)
 {
+#ifdef HAVE_LIBXVBA
   YV12Image &im     = m_buffers[index].image;
   YUVFIELDS &fields = m_buffers[index].fields;
   GLuint    *pbo    = m_buffers[index].pbo;
@@ -2617,10 +2618,12 @@ void CLinuxRendererGL::DeleteXVBAyv12Texture(int index)
       im.plane[0] = NULL;
     }
   }
+#endif
 }
 
 bool CLinuxRendererGL::CreateXVBAyv12Texture(int index)
 {
+#ifdef HAVE_LIBXVBA
   /* since we also want the field textures, pitch must be texture aligned */
   unsigned p;
 
@@ -2766,11 +2769,13 @@ bool CLinuxRendererGL::CreateXVBAyv12Texture(int index)
   }
   glDisable(m_textureTarget);
   m_eventTexturesDone[index]->Set();
+#endif
   return true;
 }
 
 void CLinuxRendererGL::UploadXVBAyv12Texture(int source)
 {
+#ifdef HAVE_LIBXVBA
   YUVBUFFER& buf       =  m_buffers[source];
   YV12Image* im        = &buf.image;
   YUVFIELDS& fields    =  buf.fields;
@@ -2854,6 +2859,7 @@ void CLinuxRendererGL::UploadXVBAyv12Texture(int source)
   CalculateTextureSourceRects(source, 3);
 
   glDisable(m_textureTarget);
+#endif
 }
 
 void CLinuxRendererGL::UploadYUV422PackedTexture(int source)
