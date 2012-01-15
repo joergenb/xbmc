@@ -1263,7 +1263,9 @@ int CDecoder::UploadTexture(int index, XVBA_SURFACE_FLAG field, GLenum textureTa
       return -1;
   }
 
-  if (!m_flipBuffer[index].outPic)
+  if (!m_flipBuffer[index].outPic ||
+      !m_flipBuffer[index].outPic->render ||
+      !m_flipBuffer[index].outPic->render->surface)
     return -1;
 
   int i = field;
@@ -1364,7 +1366,7 @@ void CDecoder::FinishGL()
 
   for (unsigned int i=0; i<m_numRenderBuffers;++i)
   {
-    if (m_flipBuffer[i].outPic && !m_flipBuffer[i].isDuplicate)
+    if (m_flipBuffer[i].outPic && !m_flipBuffer[i].isDuplicate && m_flipBuffer[i].outPic->render)
     {
       { CSingleLock lock(m_videoSurfaceSec);
         m_flipBuffer[i].outPic->render->state &= ~FF_XVBA_STATE_USED_FOR_RENDER;
@@ -1376,7 +1378,7 @@ void CDecoder::FinishGL()
       }
     }
 
-    for (int j=0; j<3; ++j)
+    for (unsigned int j=0; j<3; ++j)
     {
       if (glIsTexture(m_flipBuffer[i].glTexture[j]))
       {
@@ -1386,7 +1388,9 @@ void CDecoder::FinishGL()
       }
       if (m_flipBuffer[i].glSurface[j] && m_xvbaSession)
       {
-        g_XVBA_vtable.DestroySurface(m_flipBuffer[i].glSurface[j]);
+        { CSingleLock lock(m_apiSec);
+          g_XVBA_vtable.DestroySurface(m_flipBuffer[i].glSurface[j]);
+        }
         m_flipBuffer[i].glSurface[j] = 0;
         CLog::Log(LOGDEBUG, "XVBA::FinishGL - destroyed shared surface");
       }
