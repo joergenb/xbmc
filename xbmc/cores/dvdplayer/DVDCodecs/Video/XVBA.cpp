@@ -960,6 +960,7 @@ void CDecoder::FFDrawSlice(struct AVCodecContext *avctx,
     }
     usleep(100);
   }
+  render->state |= 4;
 }
 
 int CDecoder::FFGetBuffer(AVCodecContext *avctx, AVFrame *pic)
@@ -1066,6 +1067,7 @@ int CDecoder::FFGetBuffer(AVCodecContext *avctx, AVFrame *pic)
   pic->type= FF_BUFFER_TYPE_USER;
 
   render->state |= FF_XVBA_STATE_USED_FOR_REFERENCE;
+  render->state &= ~4;
   pic->reordered_opaque= avctx->reordered_opaque;
 
   return 0;
@@ -1091,6 +1093,11 @@ int CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
     if (!IsSurfaceValid(render))
     {
       CLog::Log(LOGWARNING, "XVBA::Decode - ignoring invalid buffer");
+      return VC_BUFFER;
+    }
+    if (!(render->state & 4))
+    {
+      CLog::Log(LOGDEBUG, "XVBA::Decode - ffmpeg failed");
       return VC_BUFFER;
     }
 
